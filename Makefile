@@ -12,7 +12,7 @@ down:
 
 ## Apply all SQL schemas in order (idempotent)
 apply:
-	@for f in $$(ls sql/*.sql | sort); do \
+	@for f in $$(ls src/calx/sql/*.sql | sort); do \
 		echo "  $$f"; \
 		psql $(DSN) -f "$$f" -q; \
 	done
