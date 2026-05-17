@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+.venv/
+venv/
+.env
+.envrc
+
+# OEIS validation fixtures are pulled on demand
+tests/fixtures/oeis/b*.txt
+
+# Local data dumps
+*.dump
+*.sql.gz
+
+# Claude IDE settings
+.claude/

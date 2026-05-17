@@ -1,0 +1,10 @@
+{
+    "project": "calx",
+    "version": 1,
+    "core_db": "C:/AI-Local/Curry/curry_core.db",
+    "local_db": ".curry/curry.db",
+    "default_model": "claude-sonnet-4-6",
+    "default_model_version": 1,
+    "mcp_tool_prefix": "curry_calx",
+    "curry_module_path": "C:/AI-Local/Curry"
+}

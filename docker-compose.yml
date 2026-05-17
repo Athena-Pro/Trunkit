@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: trunk
+      POSTGRES_PASSWORD: trunk
+      POSTGRES_DB: trunk
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trunk -d trunk"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - trunk-pgdata:/var/lib/postgresql/data
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      TRUNK_DSN: postgresql://trunk:trunk@db:5432/trunk
+      CALX_DSN: postgresql://trunk:trunk@db:5432/trunk
+    command: ["--help"]
+
+volumes:
+  trunk-pgdata:
