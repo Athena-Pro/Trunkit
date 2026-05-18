@@ -22,3 +22,6 @@ tests/fixtures/oeis/b*.txt
 
 # Claude IDE settings
 .claude/
+
+# Jules tooling
+.curry/
