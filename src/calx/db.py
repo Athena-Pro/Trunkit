@@ -22,7 +22,8 @@ from typing import Iterator
 import psycopg
 from psycopg import Connection
 
-SQL_DIR = Path(__file__).resolve().parents[2] / "sql"
+import importlib.resources
+SQL_DIR = importlib.resources.files("calx") / "sql"
 
 # calx-only DDL (unqualified names; resolve to the `calx` schema via search_path)
 SCHEMA_FILES = (

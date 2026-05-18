@@ -45,7 +45,7 @@ Just PostgreSQL, Python, and ~1 MB of schemas that describe, attest, and verify 
 docker compose up -d db
 
 # 2. Apply schemas in order (idempotent — safe to re-run)
-for f in sql/*.sql; do psql $TRUNK_DSN -f "$f"; done
+for f in src/calx/sql/*.sql; do psql $TRUNK_DSN -f "$f"; done
 
 # 3. Populate integers and run reflexive closure
 python tools/kan_in_kan.py

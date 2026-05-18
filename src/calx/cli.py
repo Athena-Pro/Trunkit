@@ -370,9 +370,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _load_tools_module(module_name: str, filename: str):
     import importlib.util
-    from pathlib import Path
+    from calx import get_shared_data_dir
 
-    path = Path(__file__).resolve().parents[2] / "tools" / filename
+    path = get_shared_data_dir("tools") / filename
     spec = importlib.util.spec_from_file_location(module_name, path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = mod
