@@ -26,6 +26,7 @@ SQL_DIR = importlib.resources.files("calx") / "sql"
 
 # calx-only DDL (unqualified names; resolve to the `calx` schema via search_path)
 SCHEMA_FILES = (
+    "00_rehome_to_calx.sql",
     "01_schema.sql",
     "02_views.sql",
     "03_generate.sql",

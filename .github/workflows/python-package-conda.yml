@@ -40,6 +40,14 @@ jobs:
       - name: Lint
         run: ruff check src/
 
+      - name: Apply schema
+        env:
+          PGPASSWORD: trunk
+        run: |
+          for f in src/calx/sql/0[0-7]*.sql; do
+            psql -h localhost -p 5434 -U trunk -d trunk -f "$f" -q
+          done
+
       - name: Test
         env:
           CALX_TEST_DSN: postgresql://trunk:trunk@localhost:5434/trunk
