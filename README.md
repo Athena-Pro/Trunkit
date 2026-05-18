@@ -44,23 +44,83 @@ Just PostgreSQL, Python, and ~1 MB of schemas that describe, attest, and verify 
 # 1. Start PostgreSQL
 docker compose up -d db
 
-# 2. Apply schemas in order (idempotent — safe to re-run)
-for f in src/calx/sql/*.sql; do psql $TRUNK_DSN -f "$f"; done
+# 2. Apply schemas (idempotent — safe to re-run)
+make apply
 
-# 3. Populate integers and run reflexive closure
-python tools/kan_in_kan.py
+# 3. Populate integers and compute reflexive closure
+trunkit generate --limit 10000
+trunkit close --write
 
 # 4. Check all claims
-psql $TRUNK_DSN -c "SELECT statement, status FROM cert.standing ORDER BY id;"
+trunkit standing
 ```
 
 ```bash
-# Python install (optional — needed for tools/)
-pip install trunkit          # from PyPI
+# Install
+pip install trunkit
 pip install -e ".[dev]"      # local development
 ```
 
-Environment variable: `TRUNK_DSN=postgresql://trunk:trunk@localhost:5434/trunk`
+Environment variable: `CALX_DSN=postgresql://trunk:trunk@localhost:5434/trunk`
+
+---
+
+## CLI
+
+Trunkit ships a dual-surface CLI. Consumer commands are read-only and safe for LLM use.
+Prover commands require `--write` to record; they dry-run without it.
+
+### Consumer — read-only
+
+```bash
+trunkit verify <claim_id>
+# Re-verifies a claim without inserting. Replays the stored witness or
+# re-runs the probe SQL in a subtransaction. Exits 0 if valid.
+
+trunkit standing [--method M] [--status S]
+# Lists all claims with their latest attestation status.
+# Filter by method (comp_sql, struct_kan, formal_external,
+# empirical_corpus, witness_carry) or status (valid, refuted, unverified).
+
+trunkit export <id> [<id> ...]
+# Emits a self-contained JSONB bundle to stdout:
+# claims + certificates + witnesses + derivations.
+# Portable — consumers can re-verify without a Trunkit install.
+```
+
+### Prover — require `--write`
+
+```bash
+trunkit check <claim_id> [--write]
+# Dry-run: shows what the claim would attest as (via cert.verify).
+# With --write: runs cert.check() and records a certificate.
+
+trunkit attest [--write]
+# Dry-run: reports formal-tier claims that would be attested.
+# With --write: runs cert_formal.py and records all formal-tier certificates.
+
+trunkit close [--write]
+# Dry-run: reports intent without side effects.
+# With --write: computes reflexive closure — curry fixed points
+# (primitive eigenforms) + kan Perron-Frobenius attractor — and
+# records eigenform claims.
+
+trunkit witness <claim_id> --kind KIND --body JSON [--write]
+# Attach a structured proof witness to a claim.
+# KIND: term | trace | counterexample | hash_chain | kan_diagram
+```
+
+### calx data
+
+```bash
+trunkit init                           # apply schema DDL
+trunkit generate --limit N             # populate integers 1..N
+trunkit validate [--limit N]           # compare ω/Ω against OEIS
+trunkit reset                          # drop all calx tables
+trunkit oeis-load [--family F]         # fetch curated OEIS b-files
+trunkit oeis-match [--orbit-id ID | --all]
+trunkit compose-match
+```
 
 ---
 
