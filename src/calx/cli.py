@@ -8,6 +8,7 @@ Consumer commands (read-only, safe for LLM use):
 Prover commands (require --write to record; dry-run otherwise):
     trunkit check <claim_id> [--write]
     trunkit attest [--write]
+    trunkit close [--write]
     trunkit witness <claim_id> --kind KIND --body JSON [--write]
 
 calx data commands:
@@ -146,6 +147,16 @@ def _cmd_attest(args: argparse.Namespace) -> int:
         print("  pass --write to execute and record certificates")
         return 0
     mod = _load_tools_module("cert_formal", "cert_formal.py")
+    mod.main()
+    return 0
+
+
+def _cmd_close(args: argparse.Namespace) -> int:
+    if not args.write:
+        print("  [dry-run] would compute reflexive closure — curry fixed points + kan Perron-Frobenius attractor")
+        print("  pass --write to execute and record eigenform claims")
+        return 0
+    mod = _load_tools_module("kan_in_kan", "kan_in_kan.py")
     mod.main()
     return 0
 
@@ -317,6 +328,10 @@ def build_parser() -> argparse.ArgumentParser:
     at = sub.add_parser("attest", help="run formal-tier artifact attestation")
     at.add_argument("--write", action="store_true", help="record certificates (dry-run without)")
     at.set_defaults(func=_cmd_attest)
+
+    cl = sub.add_parser("close", help="reflexive closure — curry fixed points + kan eigenform")
+    cl.add_argument("--write", action="store_true", help="record eigenform claims (dry-run without)")
+    cl.set_defaults(func=_cmd_close)
 
     wi = sub.add_parser("witness", help="attach a structured proof witness to a claim")
     wi.add_argument("claim_id", type=int)
