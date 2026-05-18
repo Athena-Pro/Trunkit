@@ -14,15 +14,14 @@ by ``kan.sync_category``.
 
 from __future__ import annotations
 
+import importlib.resources
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
-from pathlib import Path
-from typing import Iterator
 
 import psycopg
 from psycopg import Connection
 
-import importlib.resources
 SQL_DIR = importlib.resources.files("calx") / "sql"
 
 # calx-only DDL (unqualified names; resolve to the `calx` schema via search_path)

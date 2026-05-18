@@ -21,13 +21,12 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import re
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, Optional
-
+from typing import Any
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -45,7 +44,7 @@ def _load_curry_core():
     """
     project_dir = _curry_project_dir()
     config_path = project_dir / ".curry" / "config.json"
-    with open(config_path, "r", encoding="utf-8") as fh:
+    with open(config_path, encoding="utf-8") as fh:
         config = json.load(fh)
 
     curry_path = config.get("curry_module_path")
@@ -85,7 +84,7 @@ def _safe_ident(name: str) -> str:
     return name
 
 
-def execute_plan(conn, plan: Dict[str, Any]) -> Any:
+def execute_plan(conn, plan: dict[str, Any]) -> Any:
     """Execute a call plan returned by a Curry function body against ``conn``.
 
     Procedure / function names are validated against an identifier regex
@@ -106,7 +105,7 @@ def execute_plan(conn, plan: Dict[str, Any]) -> Any:
                 return None if row is None else row[0]
             if returns == "rows":
                 cols = [d.name for d in cur.description]
-                return [dict(zip(cols, r)) for r in cur.fetchall()]
+                return [dict(zip(cols, r, strict=True)) for r in cur.fetchall()]
             raise ValueError(f"unsupported 'returns' for function plan: {returns!r}")
         if sql_kind == "procedure":
             cur.execute(f"CALL {proc}({placeholders})", args)
@@ -117,9 +116,9 @@ def execute_plan(conn, plan: Dict[str, Any]) -> Any:
 def run(
     name: str,
     version: int,
-    args: Dict[str, Any],
+    args: dict[str, Any],
     *,
-    dsn: Optional[str] = None,
+    dsn: str | None = None,
 ) -> Any:
     """End-to-end: open Curry session, resolve plan, execute against Postgres."""
     from . import db  # lazy: psycopg is only required when actually executing
@@ -129,7 +128,7 @@ def run(
         return execute_plan(conn, plan)
 
 
-def plan_only(name: str, version: int, args: Dict[str, Any]) -> Dict[str, Any]:
+def plan_only(name: str, version: int, args: dict[str, Any]) -> dict[str, Any]:
     """Resolve the call plan without executing — useful for tests / inspection."""
     with curry_session() as session:
         return session.call_function(name, version, args)

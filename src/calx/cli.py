@@ -29,19 +29,17 @@ import sys
 
 from . import db, generate, validate
 
-
 # ---------------------------------------------------------------------------
 # Consumer commands — read-only, no --write gate
 # ---------------------------------------------------------------------------
 
 def _cmd_verify(args: argparse.Namespace) -> int:
-    with db.connect(args.dsn) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT ok, evidence, witness FROM cert.verify(%s)",
-                (args.claim_id,),
-            )
-            row = cur.fetchone()
+    with db.connect(args.dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT ok, evidence, witness FROM cert.verify(%s)",
+            (args.claim_id,),
+        )
+        row = cur.fetchone()
     if row is None:
         print(f"  claim {args.claim_id} not found")
         return 1
@@ -68,10 +66,9 @@ def _cmd_standing(args: argparse.Namespace) -> int:
     if where:
         sql += " WHERE " + " AND ".join(where)
     sql += " ORDER BY id"
-    with db.connect(args.dsn) as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql, params)
-            rows = cur.fetchall()
+    with db.connect(args.dsn) as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        rows = cur.fetchall()
     if not rows:
         print("  (no claims match)")
         return 0
@@ -83,13 +80,12 @@ def _cmd_standing(args: argparse.Namespace) -> int:
 
 
 def _cmd_export(args: argparse.Namespace) -> int:
-    with db.connect(args.dsn) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT cert.export_bundle(%s::bigint[])",
-                (list(args.claim_ids),),
-            )
-            bundle = cur.fetchone()[0]
+    with db.connect(args.dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT cert.export_bundle(%s::bigint[])",
+            (list(args.claim_ids),),
+        )
+        bundle = cur.fetchone()[0]
     print(json.dumps(bundle, indent=2, default=str))
     return 0
 
@@ -100,13 +96,12 @@ def _cmd_export(args: argparse.Namespace) -> int:
 
 def _cmd_check(args: argparse.Namespace) -> int:
     if not args.write:
-        with db.connect(args.dsn) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT ok, evidence FROM cert.verify(%s)",
-                    (args.claim_id,),
-                )
-                row = cur.fetchone()
+        with db.connect(args.dsn) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT ok, evidence FROM cert.verify(%s)",
+                (args.claim_id,),
+            )
+            row = cur.fetchone()
         if row is None:
             print(f"  claim {args.claim_id} not found")
             return 1
@@ -116,25 +111,24 @@ def _cmd_check(args: argparse.Namespace) -> int:
         print("  pass --write to record a certificate")
         return 0
 
-    with db.connect(args.dsn) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT method FROM cert.claim WHERE id = %s",
-                (args.claim_id,),
-            )
-            row = cur.fetchone()
-            if row is None:
-                print(f"  claim {args.claim_id} not found")
-                return 1
-            method = row[0]
-            fn = "cert.check_with_witness" if method == "witness_carry" else "cert.check"
-            cur.execute(f"SELECT {fn}(%s)", (args.claim_id,))
-            cur.execute(
-                "SELECT status, seq FROM cert.certificate "
-                "WHERE claim_id = %s ORDER BY seq DESC LIMIT 1",
-                (args.claim_id,),
-            )
-            status, seq = cur.fetchone()
+    with db.connect(args.dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT method FROM cert.claim WHERE id = %s",
+            (args.claim_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            print(f"  claim {args.claim_id} not found")
+            return 1
+        method = row[0]
+        fn = "cert.check_with_witness" if method == "witness_carry" else "cert.check"
+        cur.execute(f"SELECT {fn}(%s)", (args.claim_id,))
+        cur.execute(
+            "SELECT status, seq FROM cert.certificate "
+            "WHERE claim_id = %s ORDER BY seq DESC LIMIT 1",
+            (args.claim_id,),
+        )
+        status, seq = cur.fetchone()
 
     mark = "✓" if status == "valid" else "✗" if status == "refuted" else "?"
     print(f"  [{mark}] claim {args.claim_id}  →  {status}  (cert seq={seq})")
@@ -153,7 +147,8 @@ def _cmd_attest(args: argparse.Namespace) -> int:
 
 def _cmd_close(args: argparse.Namespace) -> int:
     if not args.write:
-        print("  [dry-run] would compute reflexive closure — curry fixed points + kan Perron-Frobenius attractor")
+        print("  [dry-run] would compute reflexive closure")
+        print("  curry fixed points + kan Perron-Frobenius attractor")
         print("  pass --write to execute and record eigenform claims")
         return 0
     mod = _load_tools_module("kan_in_kan", "kan_in_kan.py")
@@ -175,13 +170,12 @@ def _cmd_witness(args: argparse.Namespace) -> int:
         print("  pass --write to record")
         return 0
 
-    with db.connect(args.dsn) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT cert.attach_witness(%s, %s, %s::jsonb)",
-                (args.claim_id, args.kind, json.dumps(body)),
-            )
-            wit_id = cur.fetchone()[0]
+    with db.connect(args.dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT cert.attach_witness(%s, %s, %s::jsonb)",
+            (args.claim_id, args.kind, json.dumps(body)),
+        )
+        wit_id = cur.fetchone()[0]
     print(f"  witness {wit_id} attached to claim {args.claim_id}")
     return 0
 
@@ -330,7 +324,8 @@ def build_parser() -> argparse.ArgumentParser:
     at.set_defaults(func=_cmd_attest)
 
     cl = sub.add_parser("close", help="reflexive closure — curry fixed points + kan eigenform")
-    cl.add_argument("--write", action="store_true", help="record eigenform claims (dry-run without)")
+    cl.add_argument("--write", action="store_true",
+                    help="record eigenform claims (dry-run without)")
     cl.set_defaults(func=_cmd_close)
 
     wi = sub.add_parser("witness", help="attach a structured proof witness to a claim")
@@ -385,6 +380,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _load_tools_module(module_name: str, filename: str):
     import importlib.util
+
     from calx import get_shared_data_dir
 
     path = get_shared_data_dir("tools") / filename
