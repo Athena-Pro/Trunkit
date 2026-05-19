@@ -1,7 +1,8 @@
 # Trunkit — Skill Guide
 
-> Connection: `TRUNK_DSN=postgresql://trunk:trunk@localhost:5434/trunk`
-> Default `search_path`: `calx, curry, kan, public` (cert is fully schema-qualified)
+> Trunkit DB: `CALX_DSN=postgresql://trunk:trunk@localhost:5434/trunk`
+> Nerode DB:  `NERODE_DSN=postgresql://nerode:nerode@localhost:5435/nerode`
+> Default `search_path` on Trunkit: `calx, curry, kan, public` (cert is fully schema-qualified)
 
 ---
 
@@ -562,3 +563,146 @@ SELECT cl_c.statement AS conclusion, d.rule, array_agg(cl_p.statement) AS premis
 | kan-engine → cert | `cert.kan_engines_all_true()` (step 79) |
 | claim → portable bundle | `cert.export_bundle(ids[])` |
 | bundle claim → verdict | `cert.verify(claim_id)` — no side effects |
+
+---
+
+## Nerode — automata engine
+
+> Connection: `NERODE_DSN=postgresql://nerode:nerode@localhost:5435/nerode`
+
+Nerode stores DFAs as first-class PostgreSQL objects and provides minimization,
+product construction, and session-level state tracking.
+
+### Core tables
+
+| Table | Purpose |
+|-------|---------|
+| `nerode.alphabets` | Named symbol sets |
+| `nerode.automata` | One row per DFA (name, alphabet_id, is_minimal) |
+| `nerode.states` | `(automaton_id, state_index, is_accepting, label)` |
+| `nerode.transitions` | `(automaton_id, from_state, symbol, to_state)` |
+| `nerode.sequence_cache` | Session key → JSONB result blob |
+| `nerode.construction_log` | Build provenance |
+
+### Building and running DFAs
+
+```sql
+-- Run a DFA on a string (single-char alphabet)
+SELECT nerode.run_to_state(dfa_id, 'aabba');
+
+-- Run on paired symbols (e.g. metric_x_control)
+SELECT nerode.run_to_state_arr(dfa_id, ARRAY['UA','D_','U_','D_','U_','D_']);
+
+-- Minimize a DFA (Hopcroft, returns new DFA id)
+SELECT nerode.minimize(dfa_id);
+
+-- Product construction: 'intersection' | 'union' | 'difference'
+SELECT nerode.product(dfa1_id, dfa2_id, 'intersection');
+
+-- Export DFA as JSON
+SELECT nerode.export_json(dfa_id);
+```
+
+### Session DFAs (Porter handoff)
+
+```sql
+-- Open a new session
+SELECT nerode.open_session('session-abc', 'model-a-001');
+
+-- Run events through the session DFA and advance state
+SELECT nerode.run_to_state(session_dfa_id, 'events');
+
+-- Close session and certify (returns cert bundle id)
+SELECT nerode.close_session('session-abc', 'model-a-001');
+
+-- Re-open as a new model (returns prior session context)
+SELECT nerode.open_session('session-abc', 'model-b-001');
+```
+
+### Cybernetic DFAs
+
+Pre-built DFAs for metric/control monitoring. All use `metric_x_control` or
+single-char alphabets. Log events and let pg_notify fire alerts:
+
+```sql
+-- Build a dead_time_k DFA for arbitrary k (idempotent)
+SELECT nerode.ensure_dead_time(7);   -- name: dead_time_7
+
+-- Log a paired (metric, control) event
+SELECT nerode.log_cybernetic(session_id, 'metric_x_control', 'UA', '{"src":"cpu"}'::jsonb);
+-- fires pg_notify('nerode_control_warn', ...) if any pattern matches
+
+-- Scan all cybernetic DFAs against a session
+SELECT * FROM nerode.scan_cybernetic(session_id);
+```
+
+| DFA | Alphabet | Pattern | Meaning |
+|-----|----------|---------|---------|
+| `metric_rise_3` | `U/D/S` | `U{3,}` | 3+ consecutive rises |
+| `metric_oscillate` | `U/D/S` | `(UD){3,}` | oscillation |
+| `dead_time_k` | `A/_` | `A_{k,}` | action without response in k steps |
+| `homeostasis_alarm_5` | `O/I` | `O{5,}` | 5+ steps outside target band |
+| `dead_time_5_x_metric_oscillate` | `UA/UR/…` | composite | oscillating AND unresponsive |
+
+### Composite DFAs (paired alphabet)
+
+`nerode.ensure_composite_cybernetic()` builds a cross-alphabet product DFA:
+
+```sql
+SELECT nerode.ensure_composite_cybernetic(
+    'my_composite',
+    'dead_time_5', 1,        -- component 1: left char of pair
+    'metric_oscillate', 2    -- component 2: right char of pair
+);
+```
+
+Projection expands each single-char transition to all matching paired symbols,
+then calls `nerode.product(..., 'intersection')`.
+
+---
+
+## Porter — agent context handoff
+
+Porter pre-packs external data and session state into a cert-signed envelope
+before a session ends. The next model opens the envelope with zero tool calls.
+
+```python
+from nerode.precache import Precacher
+from nerode.sources import WeatherSource, TickerSource, HNSource, TickerHistorySource
+
+# Model A — fetch and pack
+with Precacher("brief-2026-05-19") as pc:
+    pc.fetch("weather:london", WeatherSource(51.5, -0.1, label="London"))
+    pc.fetch("ticker:AAPL",    TickerSource("AAPL"))
+    pc.fetch("news:hn:top5",   HNSource(5))
+    pc.fetch("history:AAPL",   TickerHistorySource("AAPL", days=5))
+
+# Close session and get signed envelope
+envelope = pc.close("session-abc", "model-a-001")
+
+# Model B — arrive with full context, cert verified, zero tool calls
+ctx = Precacher.open(envelope, "model-b-001")
+resolved = ctx["resolved"]   # all keys, ready to use
+prior    = ctx["prior"]      # prior session metadata
+```
+
+### Sources
+
+| Source | Fetches | Output |
+|--------|---------|--------|
+| `WeatherSource(lat, lon)` | Open-Meteo current wx | `{"temp_c": ..., "wind_kph": ...}` |
+| `TickerSource(symbol)` | Yahoo Finance quote | `{"price": ..., "change_pct": ...}` |
+| `HNSource(n)` | HN top-n stories | `[{"title": ..., "url": ...}, ...]` |
+| `TickerHistorySource(symbol, days)` | Yahoo Finance OHLCV | `[{"date":..., "close":..., "direction":"U/D/S"}, ...]` |
+| `HttpSource(url)` | Raw GET | parsed JSON or text |
+| `CallableSource(fn)` | Arbitrary callable | fn() return value |
+
+### Precacher API
+
+```python
+pc = Precacher(session_key, dsn=None)   # dsn defaults to NERODE_DSN env var
+pc.connect()
+pc.fetch(key, source)                   # fetches and stores in sequence_cache
+pc.close(session_id, model_id)          # certifies + returns envelope dict
+Precacher.open(envelope, model_id)      # verifies cert, returns context dict
+```
