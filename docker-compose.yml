@@ -1,0 +1,49 @@
+services:
+  db-trunkit:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: trunk
+      POSTGRES_PASSWORD: trunk
+      POSTGRES_DB: trunk
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trunk -d trunk"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - trunk-pgdata:/var/lib/postgresql/data
+
+  db-nerode:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nerode
+      POSTGRES_PASSWORD: nerode
+      POSTGRES_DB: nerode
+    ports:
+      - "5435:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nerode -d nerode"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - nerode-pgdata:/var/lib/postgresql/data
+
+  app:
+    build: .
+    depends_on:
+      db-trunkit:
+        condition: service_healthy
+      db-nerode:
+        condition: service_healthy
+    environment:
+      TRUNK_DSN: postgresql://trunk:trunk@db-trunkit:5432/trunk
+      CALX_DSN: postgresql://trunk:trunk@db-trunkit:5432/trunk
+      NERODE_DSN: postgresql://nerode:nerode@db-nerode:5432/nerode
+    command: ["--help"]
+
+volumes:
+  trunk-pgdata:
+  nerode-pgdata:

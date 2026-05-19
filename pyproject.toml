@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nerode"
+version = "0.1.0"
+description = "Nerode — deterministic automata construction middleware, companion to Trunkit"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = [
+  "postgresql", "automata", "formal-languages", "proof-carrying-code",
+  "dfa", "minimization", "nerode-equivalence", "formal-verification",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: SQL",
+  "Topic :: Scientific/Engineering :: Mathematics",
+  "Topic :: Database",
+]
+dependencies = [
+  "psycopg[binary]>=3.2,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-cov>=5",
+  "ruff>=0.6",
+  "build>=1.0",
+  "twine>=5.0",
+]
+
+[project.scripts]
+nerode = "nerode.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nerode"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+tools = "share/nerode/tools"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = ["error"]
+markers = [
+    "network: tests that make real HTTP requests (deselect with -m 'not network')",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

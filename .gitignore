@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+.env
+*.whl
+*.tar.gz
+.ruff_cache/
+.pytest_cache/
+*.pyc
+
+# DB artifacts
+*.dump
+*.sql.bak
+
+# Editor
+.vscode/
+.idea/
+
+# Local artifacts
+test_results.txt
+.claude/
+
+# Accidentally-named venv path fragments
+Users*/
