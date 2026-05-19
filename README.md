@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Trunkit" width="220" />
+</p>
+
 # Trunkit
 
 > The smallest elephant in the room that's not too Coq-y and doesn't Lean too heavily on your system.
