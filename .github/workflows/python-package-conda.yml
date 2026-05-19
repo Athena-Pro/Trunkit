@@ -76,7 +76,7 @@ jobs:
         env:
           CALX_TEST_DSN: postgresql://trunk:trunk@localhost:5434/trunk
           NERODE_TEST_DSN: postgresql://nerode:nerode@localhost:5435/nerode
-        run: pytest -m "not slow and not primesieve"
+        run: pytest -m "not slow and not primesieve and not network"
 
   build:
     runs-on: ubuntu-latest
