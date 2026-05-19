@@ -89,6 +89,11 @@ def _initialized_calx_db(calx_dsn: str) -> str:
     return calx_dsn
 
 
+@pytest.fixture(scope="session")
+def _initialized_db(_initialized_calx_db: str) -> str:
+    return _initialized_calx_db
+
+
 @pytest.fixture()
 def calx_conn(_initialized_calx_db: str) -> Connection:
     from calx import db as calx_db

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import psycopg
 import pytest
 
 from calx import generate
@@ -13,7 +14,14 @@ PRIMES_UNDER_100 = [
 ]
 
 
-@pytest.fixture()
+@pytest.fixture(scope="module")
+def conn(_initialized_calx_db):
+    c = psycopg.connect(_initialized_calx_db)
+    yield c
+    c.close()
+
+
+@pytest.fixture(scope="module")
 def populated(conn):
     generate.generate_pure(conn, 100)
     return conn

@@ -19,7 +19,7 @@ from . import primesieve
 
 def generate_pure(conn: Connection, limit: int) -> None:
     with conn.cursor() as cur:
-        cur.execute("CALL generate_integer_database(%s)", (limit,))
+        cur.execute("CALL generate_integer_database(%s::bigint)", (limit,))
 
 
 def generate_with_primesieve(conn: Connection, limit: int) -> None:
