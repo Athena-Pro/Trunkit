@@ -49,6 +49,7 @@ def test_mod_inverse(conn, a, m):
 def test_mod_inverse_no_inverse_raises(conn):
     with pytest.raises(psycopg.errors.RaiseException):
         _call_scalar(conn, "SELECT mod_inverse(%s::bigint, %s::bigint)", 6, 9)
+    conn.rollback()  # abort left the transaction in error state; reset for subsequent tests
 
 
 def test_crt_three_moduli(conn):
