@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
-      postgres:
+      postgres-trunkit:
         image: postgres:16
         env:
           POSTGRES_USER: trunk
@@ -20,6 +20,20 @@ jobs:
           POSTGRES_DB: trunk
         ports:
           - 5434:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      postgres-nerode:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nerode
+          POSTGRES_PASSWORD: nerode
+          POSTGRES_DB: nerode
+        ports:
+          - 5435:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -48,9 +62,20 @@ jobs:
             psql -h localhost -p 5434 -U trunk -d trunk -f "$f" -q
           done
 
+      - name: Apply Nerode schema
+        env:
+          NERODE_DSN: postgresql://nerode:nerode@localhost:5435/nerode
+        run: |
+          python -c "
+          from nerode.db import apply_schema, connect
+          with connect() as conn:
+              apply_schema(conn, verbose=True)
+          "
+
       - name: Test
         env:
           CALX_TEST_DSN: postgresql://trunk:trunk@localhost:5434/trunk
+          NERODE_TEST_DSN: postgresql://nerode:nerode@localhost:5435/nerode
         run: pytest -m "not slow and not primesieve"
 
   build:

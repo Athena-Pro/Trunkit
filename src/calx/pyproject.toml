@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+# Standalone build file for the trunkit distribution.
+# The calx package lives one level up (src/calx/) relative to the workspace
+# root, so we point setuptools at the parent directory (src/) to find it.
+#
+# To build a trunkit wheel independently:
+#   cd src/calx
+#   python -m build
+#
+# To install locally (editable):
+#   pip install -e "../../[dev]"   # installs both packages from workspace root
+
+[project]
+name = "trunkit"
+version = "0.1.0"
+description = "Trunkit — proof-carrying code kernel on PostgreSQL"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+keywords = [
+  "postgresql", "proof-carrying-code", "formal-verification",
+  "automata", "category-theory", "integer-sequences",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: SQL",
+  "Topic :: Scientific/Engineering :: Mathematics",
+  "Topic :: Database",
+]
+dependencies = [
+  "psycopg[binary]>=3.2,<4",
+]
+
+[project.urls]
+Homepage = "https://github.com/Athena-Pro/Trunkit"
+Repository = "https://github.com/Athena-Pro/Trunkit"
+
+[project.scripts]
+trunkit = "calx.cli:main"
+
+[tool.setuptools]
+# Look for packages in the parent directory (src/) so setuptools finds calx/
+package-dir = {"" = ".."}
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["calx*"]
+
+[tool.setuptools.package-data]
+calx = ["sql/*.sql"]
