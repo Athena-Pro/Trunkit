@@ -1,19 +1,33 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 dist/
 build/
 .venv/
+venv/
 .env
+.envrc
 *.whl
 *.tar.gz
-.ruff_cache/
-.pytest_cache/
-*.pyc
 
-# DB artifacts
+# OEIS validation fixtures are pulled on demand
+tests/fixtures/oeis/b*.txt
+
+# Local data dumps
 *.dump
 *.sql.bak
+*.sql.gz
+
+# Claude IDE settings
+.claude/
+
+# Jules tooling
+.curry/
 
 # Editor
 .vscode/
@@ -21,7 +35,6 @@ build/
 
 # Local artifacts
 test_results.txt
-.claude/
 
 # Accidentally-named venv path fragments
 Users*/
