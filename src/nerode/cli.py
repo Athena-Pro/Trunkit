@@ -33,7 +33,6 @@ import psycopg
 from .automata import export_from_db, import_to_db, load_json, print_transition_table
 from .db import TRUNKIT_DSN, apply_schema, connect, resolve_dsn
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -186,10 +185,15 @@ def cmd_close(args: argparse.Namespace) -> None:
         n_distinct = len({r[1] for r in rows})
         print(f"nerode eigenform scan — {n_total} DFA(s)")
         if rows:
-            print(f"  {'ID':>6}  {'EF_ID':>6}  {'MIN':>5}  {'|Q|':>4}  {'|Q_min|':>7}  {'CLAIM':>6}")
+            hdr = f"  {'ID':>6}  {'EF_ID':>6}  {'MIN':>5}  {'|Q|':>4}  {'|Q_min|':>7}  {'CLAIM':>6}"
+            print(hdr)
             for r in rows:
                 auto_id, ef_id, is_min, orig, mins, cl_id = r
-                print(f"  {auto_id:>6}  {ef_id:>6}  {str(is_min):>5}  {orig:>4}  {mins:>7}  {cl_id:>6}")
+                row_str = (
+                    f"  {auto_id:>6}  {ef_id:>6}  {str(is_min):>5}"
+                    f"  {orig:>4}  {mins:>7}  {cl_id:>6}"
+                )
+                print(row_str)
         print(f"  {n_minimal}/{n_total} already minimal")
         print(f"  {n_nonmin}/{n_total} non-minimal (eigenforms computed)")
         print(f"  {n_distinct} distinct eigenform(s)")
@@ -230,7 +234,7 @@ def cmd_products(args: argparse.Namespace) -> None:
                 f"  {'pair':<24}  {'bound':>5}  {'actual':>6}  "
                 f"{'actual/bound':>12}  {'tight?':>7}"
             )
-            for lhs, rhs, pid, bound, actual in rows:
+            for lhs, rhs, _pid, bound, actual in rows:
                 pair_str = f"{lhs} \u00d7 {rhs}"
                 if bound is not None and actual is not None:
                     ratio = f"{actual / bound:.3f}"
@@ -379,7 +383,9 @@ def build_parser() -> argparse.ArgumentParser:
     # close (schema migration or eigenform scan)
     pc = sub.add_parser("close", help="Schema migrations or eigenform scan.")
     pc.add_argument("--apply", action="store_true", help="Apply schema migrations (idempotent).")
-    pc.add_argument("--write", action="store_true", help="Scan and certify eigenforms (fixed-point scan).")
+    pc.add_argument(
+        "--write", action="store_true", help="Scan and certify eigenforms (fixed-point scan)."
+    )
 
     # facts
     pf = sub.add_parser("facts", help="Arithmetic facts for an automaton.")
