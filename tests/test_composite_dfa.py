@@ -66,7 +66,7 @@ def _rts(conn, dfa_id: int, inp: str) -> tuple[int | None, bool | None]:
 def _rts_arr(conn, dfa_id: int, syms: list[str]) -> tuple[int | None, bool | None]:
     """Run dfa_id on an explicit list of symbols (for multi-char alphabets)."""
     state = conn.execute(
-        "SELECT nerode.run_to_state_arr(%s, %s)", (dfa_id, syms)
+        "SELECT nerode.run_to_state_arr(%s, %s::text[])", (dfa_id, syms)
     ).fetchone()[0]
     if state is None:
         return None, None
