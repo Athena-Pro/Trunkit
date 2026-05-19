@@ -2,29 +2,17 @@
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# This repository contains two packages:
-#
-#   trunkit  (src/calx/)  — proof-carrying code kernel
-#   nerode   (src/nerode/) — automata engine + Porter agent handoff
-#
-# To install both for local development:
-#   pip install -e ".[dev]"
-#
-# Each package can also be installed independently from PyPI:
-#   pip install trunkit
-#   pip install nerode
-
 [project]
-name = "nerode"
-version = "0.1.0"
-description = "Nerode / Porter — deterministic automata middleware and agent context handoff, companion to Trunkit"
+name = "trunkit"
+version = "0.2.0"
+description = "Trunkit — proof-carrying code and deterministic automata middleware on PostgreSQL, with Porter agent context handoff"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 keywords = [
-  "postgresql", "automata", "formal-languages", "proof-carrying-code",
-  "dfa", "minimization", "nerode-equivalence", "formal-verification",
-  "agent", "handoff", "llm",
+  "postgresql", "proof-carrying-code", "formal-verification",
+  "automata", "dfa", "minimization", "nerode-equivalence",
+  "category-theory", "integer-sequences", "agent", "handoff", "llm",
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -56,13 +44,11 @@ dev = [
 ]
 
 [project.scripts]
-nerode = "nerode.cli:main"
+trunkit = "calx.cli:main"
+nerode  = "nerode.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/nerode"]
-
-[tool.hatch.build.targets.wheel.shared-data]
-tools = "share/nerode/tools"
+packages = ["src/calx", "src/nerode"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
