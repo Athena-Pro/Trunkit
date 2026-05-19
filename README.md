@@ -12,7 +12,6 @@ and lets consumers re-verify results without trusting the producer — all insid
 database you already operate, with no specialist toolchain required.
 
 No 3 GB compiler. No gigabytes of cached proof objects. No new runtime to learn.
-<<<<<<< HEAD
 Just PostgreSQL, Python, and schemas that describe, attest, and verify themselves.
 
 ---
@@ -34,8 +33,8 @@ Just PostgreSQL, Python, and schemas that describe, attest, and verify themselve
 │  attestation             │  (monoidal · NTs · Kan · profunctors)  │
 ├──────────────────────────┼───────────────────────────────────────┤
 │  curry                   │  calx                                  │
-│  versioned provenance    │  integer arithmetic bedrock            │
-│  + immutable constants   │  (primes · CRT · dynamics · OEIS)     │
+│  versioned provenance    │  + immutable constants                 │
+│  + immutable constants   │  integer arithmetic bedrock            │
 └──────────────────────────┴───────────────────────────────────────┘
    Trunkit DB  postgresql://trunk:trunk@localhost:5434/trunk
    Nerode DB   postgresql://nerode:nerode@localhost:5435/nerode
@@ -45,81 +44,37 @@ Just PostgreSQL, Python, and schemas that describe, attest, and verify themselve
 |-------|------|
 | **calx** | Dense prime factorisation of ℤ[1..N]; aliquot/derivative dynamics; CRT; OEIS sequence matching |
 | **curry** | Immutable versioned constants and functions; append-only computational provenance |
-| **kan** | Category-theory meta-layer: base categories → monoidal → NTs → Kan extensions → enrichment → profunctors → adjunctions |
+| **kan** | Category-theory meta-layer: base categories → monoidal → NTs → Kan extensions → enrichment → profunctors → adjunctions; reflexively describes itself |
 | **cert** | Proof-carrying attestation: five method tiers, structured witness storage, proof composition DAG, portable bundle export, consumer re-verification |
 | **Nerode** | DFA/automata engine on PostgreSQL: construction, minimization, product, session DFAs, sequence cache, certified handoff envelopes |
 | **Porter** | Agent context handoff: pre-pack external data, certify session boundaries, hand verified context to a new model with zero tool calls |
-=======
-Just PostgreSQL, Python, and ~1 MB of schemas that describe, attest, and verify themselves.
-
----
-
-## Schemas
-
-```
-┌──────────────────────────────────────────────────────────┐
-│  cert  — proof-carrying attestation                       │
-│    witness · derivation · verify() · export_bundle()      │
-├──────────────┬───────────────────────────────────────────┤
-│  kan         │  curry                                     │
-│  category    │  versioned provenance                      │
-│  theory      │  + immutable constants                     │
-├──────────────┴───────────────────────────────────────────┤
-│  calx  — integer arithmetic bedrock                       │
-│    primes · factorizations · dynamics · CRT · OEIS        │
-└──────────────────────────────────────────────────────────┘
-          PostgreSQL 16   ·   Python 3.11+
-```
-
-| Schema | Role |
-|--------|------|
-| **calx** | Dense prime factorisation of ℤ[1..N]; aliquot/derivative dynamics; CRT; OEIS sequence matching |
-| **curry** | Immutable versioned constants and functions; append-only computational provenance |
-| **kan** | Category-theory meta-layer: base categories → monoidal → NTs → Kan extensions → enrichment → profunctors → adjunctions; reflexively describes itself |
-| **cert** | Proof-carrying attestation: five method tiers, structured witness storage, proof composition DAG, portable bundle export, side-effect-free consumer re-verification |
->>>>>>> origin/main
 
 ---
 
 ## Quick start
 
 ```bash
-<<<<<<< HEAD
 # 1. Start both PostgreSQL instances
 docker compose up -d db-trunkit db-nerode
 
-# 2. Apply all schemas (idempotent)
+# 2. Apply all schemas (idempotent — safe to re-run)
 make apply
 
 # 3. Trunkit: populate integers and run reflexive closure
 trunkit generate --limit 10000
 trunkit close --write
 
-# 4. Porter: pre-pack a morning brief and open it as Model B
-python scripts/morning_brief_demo.py
-=======
-# 1. Start PostgreSQL
-docker compose up -d db
-
-# 2. Apply schemas (idempotent — safe to re-run)
-make apply
-
-# 3. Populate integers and compute reflexive closure
-trunkit generate --limit 10000
-trunkit close --write
-
 # 4. Check all claims
 trunkit standing
->>>>>>> origin/main
+
+# 5. Porter: pre-pack a morning brief and open it as Model B
+python scripts/morning_brief_demo.py
 ```
 
 ```bash
 # Install
-<<<<<<< HEAD
 pip install trunkit   # proof kernel
 pip install nerode    # automata + porter layer
-=======
-pip install trunkit
 pip install -e ".[dev]"      # local development
 ```
 
@@ -182,12 +137,10 @@ trunkit reset                          # drop all calx tables
 trunkit oeis-load [--family F]         # fetch curated OEIS b-files
 trunkit oeis-match [--orbit-id ID | --all]
 trunkit compose-match
->>>>>>> origin/main
 ```
 
 ---
 
-<<<<<<< HEAD
 ## Porter — model-to-model context handoff
 
 Porter solves the cold-start problem for LLM agents. Each new model call starts with no
@@ -235,42 +188,6 @@ conn.execute(
 
 ---
 
-## Trunkit schemas
-
-| Schema | Role |
-|--------|------|
-| **calx** | Dense prime factorisation of ℤ[1..N]; aliquot/derivative dynamics; CRT; OEIS sequence matching |
-| **curry** | Immutable versioned constants and functions; append-only computational provenance |
-| **kan** | Category-theory meta-layer |
-| **cert** | Proof-carrying attestation |
-
----
-
-## Repository layout
-
-```
-src/
-  calx/       — Trunkit Python package (calx + kan + curry + cert)
-  nerode/     — Nerode/Porter Python package
-    sql/      — 18 idempotent SQL schema files (00_bootstrap → 97_composite_dfa)
-    precache.py   — Precacher context manager (Porter API)
-    sources.py    — WeatherSource, TickerSource, HNSource, TickerHistorySource
-    adapters.py   — HttpSource, CallableSource, resolve(), with_retry()
-    db.py         — connection utilities + SCHEMA_FILES list
-scripts/
-  morning_brief_demo.py   — end-to-end Porter demo
-tests/
-  test_sources.py         — network tests (pytest -m network)
-  test_cybernetic.py      — cybernetic DFA tests
-  test_composite_dfa.py   — paired-alphabet composite DFA tests
-  test_dead_time_factory.py
-  test_*.py               — unit tests for all schema layers
-proofs/
-  *.py    — Trunkit proof scripts
-tools/
-  kan_in_kan.py   — Trunkit reflexive closure tool
-```
-=======
 ## cert method tiers
 
 | Method | Trust root | Use |
@@ -280,6 +197,17 @@ tools/
 | `formal_external` | SHA256-pinned external artifact | Python/Lean/Agda proof scripts |
 | `empirical_corpus` | Provenance only | Corpus document assertions |
 | `witness_carry` | In-DB witness term | Structured proof terms stored alongside certificates; consumer-replayable |
+
+---
+
+## Trunkit schemas
+
+| Schema | Role |
+|--------|------|
+| **calx** | Dense prime factorisation of ℤ[1..N]; aliquot/derivative dynamics; CRT; OEIS sequence matching |
+| **curry** | Immutable versioned constants and functions; append-only computational provenance |
+| **kan** | Category-theory meta-layer |
+| **cert** | Proof-carrying attestation |
 
 ---
 
@@ -308,7 +236,31 @@ Compare: Lean 4 toolchain ≈ 2.9 GB per version; Mathlib compiled ≈ 4–10 GB
 
 ---
 
+## Repository layout
+
+```
+src/
+  calx/       — Trunkit Python package (calx + kan + curry + cert)
+  nerode/     — Nerode/Porter Python package
+    sql/      — 18 idempotent SQL schema files (00_bootstrap → 97_composite_dfa)
+    precache.py   — Precacher context manager (Porter API)
+    sources.py    — WeatherSource, TickerSource, HNSource, TickerHistorySource
+    adapters.py   — HttpSource, CallableSource, resolve(), with_retry()
+    db.py         — connection utilities + SCHEMA_FILES list
+scripts/
+  morning_brief_demo.py   — end-to-end Porter demo
+tests/
+  test_sources.py         — network tests (pytest -m network)
+  test_cybernetic.py      — cybernetic DFA tests
+  test_composite_dfa.py   — paired-alphabet composite DFA tests
+  test_dead_time_factory.py
+  test_*.py               — unit tests for all schema layers
+proofs/
+  *.py    — Trunkit proof scripts
+tools/
+  kan_in_kan.py   — Trunkit reflexive closure tool
+```
+
 ## License
 
 MIT
->>>>>>> origin/main

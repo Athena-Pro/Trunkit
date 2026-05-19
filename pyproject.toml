@@ -16,7 +16,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nerode"
-version = "0.1.0"
+version = "0.2.0"
 description = "Nerode / Porter — deterministic automata middleware and agent context handoff, companion to Trunkit"
 readme = "README.md"
 requires-python = ">=3.11"
