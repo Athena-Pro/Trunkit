@@ -2,7 +2,7 @@
 
 Covers the step functions, orbit tracer (cycles + fixed points), and
 characterize_relation. Requires the populated_module fixture from
-test_factorizations.py via _initialized_db.
+test_factorizations.py via _initialized_calx_db.
 """
 
 from __future__ import annotations
@@ -13,10 +13,10 @@ from calx import generate
 
 
 @pytest.fixture(scope="module")
-def populated(_initialized_db):
+def populated(_initialized_calx_db):
     from calx import db as _db
 
-    with _db.connect(_initialized_db) as c:
+    with _db.connect(_initialized_calx_db) as c:
         with c.cursor() as cur:
             cur.execute(
                 "TRUNCATE factorizations, primes, integers, "

@@ -10,10 +10,10 @@ from calx import generate
 
 
 @pytest.fixture(scope="module")
-def populated(_initialized_db):
+def populated(_initialized_calx_db):
     from calx import db as _db
 
-    with _db.connect(_initialized_db) as c:
+    with _db.connect(_initialized_calx_db) as c:
         with c.cursor() as cur:
             cur.execute(
                 "TRUNCATE factorizations, primes, integers, "

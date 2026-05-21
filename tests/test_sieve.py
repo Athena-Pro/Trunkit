@@ -14,9 +14,9 @@ PRIMES_UNDER_100 = [
 
 
 @pytest.fixture()
-def populated(conn):
-    generate.generate_pure(conn, 100)
-    return conn
+def populated(calx_conn):
+    generate.generate_pure(calx_conn, 100)
+    return calx_conn
 
 
 def test_prime_count(populated):
