@@ -100,6 +100,7 @@ UNIFIED_FILES = (
     "86_cert_verify.sql",
     "87_cert_export_bundle.sql",
     "88_cert_witness_carry.sql",
+    "89_nerode_bridge.sql",
 )
 
 # Applied per-session so a fresh-DB bootstrap creates calx objects in `calx`
