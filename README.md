@@ -12,7 +12,7 @@ and lets consumers re-verify results without trusting the producer — all insid
 database you already operate, with no specialist toolchain required.
 
 No 3 GB compiler. No gigabytes of cached proof objects. No new runtime to learn.
-Just PostgreSQL, Python, and schemas that describe, attest, and verify themselves.
+Just PostgreSQL, Python, and ~1.5 MB of schemas.
 
 ---
 
@@ -101,6 +101,26 @@ trunkit export <id> [<id> ...]
 # Portable — consumers can re-verify without a Trunkit install.
 ```
 
+```
+$ trunkit standing
+  [✓] #  1  comp_sql              valid         2026-05-19 14:32  28 is a perfect number: σ(28) − 28 = 28
+  [✓] #  2  witness_carry         valid         2026-05-19 14:32  12 has p-adic stratification {2:2, 3:1}
+  [✓] #  3  struct_kan            valid         2026-05-19 14:33  calx → curry functor is faithful
+  [?] #  4  formal_external       unverified    —                 σ(28) = 56 (external Python proof)
+
+$ trunkit verify 2
+  [✓] claim 2  →  VALID
+  evidence : {
+      "v2": 2,
+      "v3": 1
+  }
+  witness  : {
+      "kind": "term",
+      "levels": {"prime_2": 2, "prime_3": 1},
+      "reconstruction": "2^2 * 3^1 = 12"
+  }
+```
+
 ### Prover — require `--write`
 
 ```bash
@@ -139,26 +159,30 @@ trunkit compose-match
 
 ## Porter — model-to-model context handoff
 
-Porter solves the cold-start problem for LLM agents. Each new model call starts with no
-memory of what the previous call proved, fetched, or decided. Porter pre-packs that
-context into a certified envelope before the session ends; the next model opens the
-envelope and has everything it needs with zero tool calls.
+Each model session starts with no memory of what the previous session fetched, proved,
+or decided. Porter pre-packs that context — external data, DFA states, proof certificates
+— into an envelope before the session closes. The next model calls
+`Precacher.open(envelope, session_id)` and has everything ready, cert verified, with
+zero tool calls.
 
 ```python
+from datetime import date
 from nerode.precache import Precacher
 from nerode.sources import WeatherSource, TickerSource, HNSource
 
-today = "2026-05-19"
+today = date.today().isoformat()
 
-# Model A — pack context before closing
+# Model A — fetch and pack before closing
 with Precacher(f"brief-{today}") as pc:
     pc.fetch(f"weather:london:{today}", WeatherSource(51.5, -0.1, label="London"))
     pc.fetch(f"ticker:AAPL:{today}",    TickerSource("AAPL"))
     pc.fetch(f"news:hn:top5:{today}",   HNSource(5))
+# __exit__ calls close_session(); pc.envelope is now set
 
-# Model B — arrive with full context, cert verified, zero tool calls
+# Model B — open the envelope in a separate process/connection
 ctx = Precacher.open(pc.envelope, "model-b-001")
-resolved = ctx["resolved"]   # all three values, ready to use
+resolved = ctx["resolved"]        # {"weather:london:…": {…}, "ticker:AAPL:…": {…}, …}
+cert_ok  = ctx["prior_session"]["cert_valid"]   # True
 ```
 
 ### Cybernetic monitoring
