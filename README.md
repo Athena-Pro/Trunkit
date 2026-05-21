@@ -5,7 +5,7 @@
 # Trunkit
 
 > The smallest elephant in the room that's not too Coq-y and doesn't Lean too heavily on your system.
-
+h
 Proof-carrying code middleware on PostgreSQL. Trunkit is a self-contained schema stack
 that attaches verifiable claims to mathematical objects, chains proofs compositionally,
 and lets consumers re-verify results without trusting the producer — all inside a
