@@ -34,7 +34,6 @@ import urllib.parse
 import urllib.request
 from typing import Any, Protocol, runtime_checkable
 
-
 # ---------------------------------------------------------------------------
 # Source protocol
 # ---------------------------------------------------------------------------

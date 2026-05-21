@@ -32,7 +32,6 @@ from typing import Any
 
 from nerode.adapters import HttpSource
 
-
 # ---------------------------------------------------------------------------
 # WeatherSource — open-meteo.com (no key, free)
 # ---------------------------------------------------------------------------
@@ -246,7 +245,7 @@ class TickerHistorySource:
         closes = r.get("indicators", {}).get("quote", [{}])[0].get("close") or []
 
         out: list[dict[str, Any]] = []
-        for i, (ts, close) in enumerate(zip(timestamps, closes)):
+        for _i, (ts, close) in enumerate(zip(timestamps, closes, strict=False)):
             if close is None:
                 continue
             day = _dt.utcfromtimestamp(ts).date().isoformat()
