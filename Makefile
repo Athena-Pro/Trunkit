@@ -1,27 +1,17 @@
-<<<<<<< HEAD
 TRUNK_DSN  ?= postgresql://trunk:trunk@localhost:5434/trunk
 NERODE_DSN ?= postgresql://nerode:nerode@localhost:5435/nerode
 
-.PHONY: up down apply apply-trunkit apply-nerode check install dev-install test lint build
+.PHONY: up down apply apply-trunkit apply-nerode check check-trunkit check-nerode \
+        install dev-install test test-network lint build reset-trunkit reset-nerode
 
 ## Start both PostgreSQL instances via Docker Compose
 up:
 	docker compose up -d db-trunkit db-nerode
-=======
-DSN ?= postgresql://trunk:trunk@localhost:5434/trunk
-
-.PHONY: up down apply check reset install
-
-## Start PostgreSQL via Docker Compose
-up:
-	docker compose up -d db
->>>>>>> origin/main
 
 ## Stop and remove containers
 down:
 	docker compose down
 
-<<<<<<< HEAD
 ## Apply Trunkit (calx/kan/curry/cert) schemas — idempotent
 apply-trunkit:
 	@for f in $$(ls src/calx/sql/*.sql | sort); do \
@@ -56,32 +46,10 @@ check: check-trunkit check-nerode
 ## Full local bootstrap: up -> apply -> check
 install: up
 	@echo "Waiting for databases to be ready..."
-=======
-## Apply all SQL schemas in order (idempotent)
-apply:
-	@for f in $$(ls src/calx/sql/*.sql | sort); do \
-		echo "  $$f"; \
-		psql $(DSN) -f "$$f" -q; \
-	done
-	@echo "Done. Run 'make check' to verify."
-
-## Populate integers and run reflexive closure + cert attestation
-check:
-	python tools/kan_in_kan.py
-
-## Attest formal-tier proof artifacts
-attest:
-	python tools/cert_formal.py
-
-## Full local bootstrap: up → apply → check
-install: up
-	@echo "Waiting for db to be ready..."
->>>>>>> origin/main
 	@sleep 3
 	$(MAKE) apply
 	$(MAKE) check
 
-<<<<<<< HEAD
 ## Install Python packages in editable/dev mode
 dev-install:
 	pip install -e ".[dev]"
@@ -112,10 +80,3 @@ reset-trunkit:
 reset-nerode:
 	psql "$(NERODE_DSN)" -c "DROP SCHEMA IF EXISTS nerode CASCADE;"
 	$(MAKE) apply-nerode
-=======
-## Drop all Trunkit schemas and start fresh (destructive)
-reset:
-	psql $(DSN) -c "DROP SCHEMA IF EXISTS cert, kan, curry, calx CASCADE;"
-	$(MAKE) apply
-	$(MAKE) check
->>>>>>> origin/main

@@ -44,7 +44,7 @@ jobs:
         env:
           PGPASSWORD: trunk
         run: |
-          for f in src/calx/sql/0[0-7]*.sql; do
+          for f in $(ls src/calx/sql/*.sql | sort); do
             psql -h localhost -p 5434 -U trunk -d trunk -f "$f" -q
           done
 
