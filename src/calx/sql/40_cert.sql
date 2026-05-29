@@ -154,13 +154,13 @@ SELECT DISTINCT ON (cl.id)
        cl.claim_kind,
        cl.method,
        ce.seq,
-       ce.status,
+       COALESCE(ce.status, 'unchecked') AS status,
        ce.checked_at,
        ce.evidence,
        ce.valid_under
   FROM cert.claim cl
-  JOIN cert.certificate ce ON ce.claim_id = cl.id
- ORDER BY cl.id, ce.seq DESC;
+  LEFT JOIN cert.certificate ce ON ce.claim_id = cl.id
+ ORDER BY cl.id, ce.seq DESC NULLS LAST;
 
 -- ---- Seed the four method tiers --------------------------------------------
 INSERT INTO cert.method (name, claim_kind, checker_kind, description) VALUES
