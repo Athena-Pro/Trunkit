@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "trunkit"
-version = "0.2.3"
+version = "0.2.4"
 description = "Trunkit — proof-carrying code and deterministic automata middleware on PostgreSQL, with Porter agent context handoff"
 readme = "README.md"
 requires-python = ">=3.11"
