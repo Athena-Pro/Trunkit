@@ -16,10 +16,10 @@
 
 | # | Step | Command |
 |---|---|---|
-| 0.1 | Check out the pinned release | `git -C C:\AI-Local\Trunk fetch --tags && git -C C:\AI-Local\Trunk checkout v0.2.4` |
-| 0.2 | Confirm the tree is clean & version | `git -C C:\AI-Local\Trunk status --short` → empty; `grep '^version' pyproject.toml` → `0.2.4` |
-| 0.3 | Bring up the DB | `docker compose -f C:\AI-Local\Trunk\docker-compose.yml up -d db` |
-| 0.4 | Confirm container + connectivity | `docker exec -i trunk-db-1 psql -U trunk -d trunk -c "select 1"` → `1` |
+| 0.1 | Check out the pinned release | `git fetch --tags && git checkout v0.2.4` |
+| 0.2 | Confirm the tree is clean & version | `git status --short` → empty; `grep '^version' pyproject.toml` → `0.2.4` |
+| 0.3 | Bring up the DB | `docker compose up -d db-trunkit` |
+| 0.4 | Confirm container + connectivity | `docker exec -i trunkit-db-trunkit-1 psql -U trunk -d trunk -c "select 1"` → `1` |
 
 DSN for reference: `******localhost:5434/trunk`.
 All SQL below runs as: `docker exec -i trunk-db-1 psql -U trunk -d trunk -c "<SQL>"`.
