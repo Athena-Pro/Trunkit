@@ -31,8 +31,9 @@ DECLARE
     v_andcols  TEXT;
     v_rowok    BOOLEAN;
     v_engines  JSONB := '{}'::jsonb;
-    v_allok    BOOLEAN := TRUE;
-    v_n        INTEGER := 0;
+    v_n        INTEGER := 0;   -- engines with law data (non-empty)
+    v_empty    INTEGER := 0;   -- engines whose laws view has no witnesses
+    v_violated INTEGER := 0;   -- engines with a genuinely-false law
 BEGIN
     FOR v IN
         SELECT table_name
@@ -57,19 +58,35 @@ BEGIN
         EXECUTE format(
             'SELECT bool_and(%s) FROM kan.%I', v_andcols, v.table_name
         ) INTO v_rowok;
-        v_rowok := COALESCE(v_rowok, FALSE);
-        v_engines := v_engines
-            || jsonb_build_object(v.table_name, v_rowok);
-        v_n := v_n + 1;
-        IF NOT v_rowok THEN
-            v_allok := FALSE;
+        -- NULL bool_and == no witnesses / all-null row == laws UNKNOWN (empty
+        -- engine), NOT violated. Conflating the two manufactures false
+        -- contradictions and masks genuine ones; keep the three-valued signal.
+        IF v_rowok IS NULL THEN
+            v_engines := v_engines
+                || jsonb_build_object(v.table_name, 'empty');
+            v_empty := v_empty + 1;
+        ELSE
+            v_engines := v_engines
+                || jsonb_build_object(v.table_name, v_rowok);
+            v_n := v_n + 1;
+            IF NOT v_rowok THEN
+                v_violated := v_violated + 1;
+            END IF;
         END IF;
     END LOOP;
 
-    RETURN QUERY SELECT (v_allok AND v_n > 0),
-                        jsonb_build_object('engines_checked', v_n,
-                                           'all_true', v_allok,
-                                           'engines', v_engines);
+    -- refuted only on a genuine violation; unverified when populated engines
+    -- hold but some are empty (or nothing populated); valid when every
+    -- populated engine holds and none are empty.
+    RETURN QUERY SELECT
+        CASE WHEN v_violated > 0         THEN FALSE
+             WHEN v_empty > 0 OR v_n = 0 THEN NULL
+             ELSE TRUE END,
+        jsonb_build_object('engines_checked', v_n,
+                           'engines_empty',  v_empty,
+                           'violations',     v_violated,
+                           'all_true', (v_violated = 0 AND v_empty = 0 AND v_n > 0),
+                           'engines', v_engines);
 END
 $$;
 
