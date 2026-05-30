@@ -44,10 +44,38 @@ Just PostgreSQL, Python, and ~1.5 MB of schemas.
 |-------|------|
 | **calx** | Dense prime factorisation of ℤ[1..N]; aliquot/derivative dynamics; CRT; OEIS sequence matching |
 | **curry** | Immutable versioned constants and functions; append-only computational provenance |
-| **kan** | Category-theory meta-layer: base categories → monoidal → NTs → Kan extensions → enrichment → profunctors → adjunctions |
+| **kan** | Category-*structured* meta-layer: reflects Postgres FK graphs into objects/morphisms and checks **structural invariants** (triangle commutativity, product universal property, naturality, epi classification) as re-runnable probes — see the caveat below |
 | **cert** | Proof-carrying attestation: five method tiers, structured witness storage, proof composition DAG, portable bundle export, consumer re-verification |
 | **Nerode** | DFA/automata engine on PostgreSQL: construction, minimization, product, session DFAs, sequence cache, certified handoff envelopes |
 | **Porter** | Agent context handoff: pre-pack external data, certify session boundaries, hand verified context to a new model with zero tool calls |
+
+> **What "kan" does and does not claim.** kan performs *structural invariant
+> checking*, **not formal proof**. A claim like "the calx → curry functor is
+> faithful" is attested by a SQL probe that checks the **current database state**
+> (e.g. the morphism map is injective on the rows present) — it is re-runnable
+> evidence, not a machine-checked theorem about all inputs. Real proof lives in
+> external Lean/Agda artifacts (the `formal_external` tier) or in the
+> independent `cert_kernel` checkers. Treat `struct_kan` as "this categorical
+> invariant holds over the data we have," with the same three-valued honesty
+> (`valid`/`refuted`/`unverified`) as everywhere else.
+
+### Why two databases?
+
+Trunkit (calx/curry/kan/cert) and Nerode (automata/porter) run as **separate
+PostgreSQL instances** by design, not by accident:
+
+- **Failure & trust isolation** — the proof ledger (append-only, hash-chained;
+  see `SECURITY.md`) must not share a backend with the automata/agent-handoff
+  workload, which ingests external data and runs untrusted-ish session traces.
+- **Independent lifecycle** — Nerode can be reset/rebuilt (it's a cache + DFA
+  workspace) without touching the immutable cert ledger.
+- **Cross-instance entanglement is by value, not by FK** — a Porter envelope
+  embeds `cert.ledger_root()` and the cert side records the envelope hash via
+  `cert.anchor_external`, so the two are cryptographically linked without a
+  shared transaction (a single physical chain can't span two instances anyway).
+
+The cost is real (two DSNs, two `apply` targets); the benefit is that a
+compromised or wiped Nerode cannot corrupt or rewrite proof history.
 
 ---
 
@@ -241,7 +269,13 @@ conn.execute(
 | Src + tests + config | ~58 | ~483 KB |
 | **Total (no virtualenv)** | **~199** | **~1.4 MB** |
 
-Compare: Lean 4 toolchain ≈ 2.9 GB per version; Mathlib compiled ≈ 4–10 GB per project.
+For scale only (not a capability comparison): a Lean 4 toolchain is ≈ 2.9 GB
+per version and a compiled Mathlib ≈ 4–10 GB per project. **Trunkit is not a
+substitute for a proof assistant** — Lean/Mathlib verify arbitrary
+human-authored theorems, whereas Trunkit re-checks a fixed, small set of
+certificate schemas (factorization, CRT, Egyptian fractions, matrix words) plus
+re-runnable in-DB probes. The size figures say only that Trunkit fits in a
+database you already run; they do **not** imply equivalent verification power.
 
 ---
 

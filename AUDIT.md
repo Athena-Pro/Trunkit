@@ -143,7 +143,65 @@ experiment file, or recompute the statistic) — not a stale/aspirational thresh
 
 ---
 
-## 9. Findings & sign-off
+## 9. Adversarial / CWE checks (Phase-1 security)
+
+> Tests the hardening from `SECURITY.md`. Until probe-sandbox (design A) and
+> ledger-signing (design B) land, the **Expected** column states the *current*
+> behaviour and flags it as a **KNOWN GAP**; after they land, re-run and the
+> Expected becomes the enforced behaviour. A gap you can reproduce is a finding,
+> not a pass — but a *self-reported, documented* gap is honest, not a failure.
+
+### 9A. CWE-89/94 — probe is code execution (the P0 surface)
+
+| # | Objective | Command (SQL) | Expected | Actual | P/F |
+|---|---|---|---|---|---|
+| 9A.1 | Enumerate every probe-EXECUTE site | `grep -rn "EXECUTE v_claim.probe_sql" src/calx/sql/` | 4 sites: 40_cert:101, 86_cert_verify:32, 88_cert_witness_carry:56, 94_cert_kernel:485 | | |
+| 9A.2 | **Adversarial probe — filesystem read.** Insert a claim whose probe calls `pg_read_file`, then verify it. *Throwaway tx; ROLLBACK.* | see §9A-ADV | **pre-hardening: KNOWN GAP** (probe runs as caller; may read files). **post-A: denied / sandboxed** (role lacks `pg_read_file`; → `error`/`unverified`, never `valid`) | | |
+| 9A.3 | **Adversarial probe — write attempt.** Probe does `INSERT INTO curry.constants ...`. | post-A: fails on `default_transaction_read_only` / role grant → `error`, no row written | | |
+| 9A.4 | **Runaway probe.** Probe is `SELECT pg_sleep(60), ...`. | post-A: killed by `statement_timeout` (~5s) → `error`, not a hang | | |
+| 9A.5 | Policy invariant: untrusted facts use `cert_kernel`, not `probe_sql` | `SELECT count(*) FROM cert.claim WHERE method='cert_kernel' AND probe_sql IS NOT NULL;` | `0` (kernel claims carry **data** witnesses, never code) | | |
+
+**§9A-ADV (do in a throwaway transaction, ROLLBACK after):**
+```sql
+BEGIN;
+INSERT INTO cert.claim (subject_kind, subject_ref, statement, claim_kind, method, probe_sql)
+VALUES ('adversarial','{}','ADV pg_read_file probe (audit only)','computational','comp_sql',
+        $p$ SELECT (pg_read_file('/etc/hostname') IS NOT NULL) AS ok,
+                   jsonb_build_object('leak', left(pg_read_file('/etc/hostname'),0)) AS evidence $p$);
+SELECT status, left(evidence::text,60) FROM cert.check(
+  (SELECT id FROM cert.claim WHERE statement='ADV pg_read_file probe (audit only)'));
+ROLLBACK;
+```
+*Pre-hardening this may return `valid` — that is the documented CWE-89 gap, the
+reason Phase-2 (VEX) is blocked until design A lands. Post-hardening it must be
+`error`/`unverified`.*
+
+### 9B. CWE-345/347 — integrity vs authenticity
+
+| # | Objective | Command (SQL) | Expected | Actual | P/F |
+|---|---|---|---|---|---|
+| 9B.1 | Chain integrity holds | `SELECT ok, reason FROM cert.verify_chain();` | `ok=t`, "chain intact" | | |
+| 9B.2 | **In-place tamper is caught.** Forge `evidence` on one cert via a superuser side-channel (triggers block normal UPDATE). | `verify_chain` → `ok=f`, "content hash mismatch at certificate id N" | | |
+| 9B.3 | **Forged chain is NOT distinguishable yet.** Recompute a fully valid chain from public inputs in a scratch schema. | **pre-hardening: KNOWN GAP** — recomputed chain also passes `verify_chain` (no signature). **post-B: fails signature** (no `cert.signer` key) | | |
+| 9B.4 | Append-only law (CWE-915) still enforced | `UPDATE cert.certificate SET status='valid' WHERE id=1;` | raises *"append-only ledger"* exception | | |
+| 9B.5 | External anchor recorded | `SELECT count(*) FROM cert.external_anchor;` ; `SELECT cert.ledger_root();` | anchor rows present; root = latest `row_hash` | | |
+
+### 9C. CWE-862 — DB-level authorization
+
+| # | Objective | Command | Expected | Actual | P/F |
+|---|---|---|---|---|---|
+| 9C.1 | Consumer/prover split is DB-enforced, not just CLI | `\du` / check for a read-only role | **pre-hardening: KNOWN GAP** (CLI convention only). **post: consumer role cannot INSERT cert.claim** | | |
+
+### 9D. Spectre scope (no claim of mitigation)
+
+| # | Objective | Check | Expected | Actual | P/F |
+|---|---|---|---|---|---|
+| 9D.1 | Trunkit makes no Spectre-mitigation claim | `grep -ni "mitigat" SECURITY.md` | §6 states "does not mitigate, must not claim to" | | |
+| 9D.2 | Untrusted path is data, not code (the in-model Spectre lesson) | review `cert_kernel` checkers take JSONB witnesses, no caller SQL | confirmed: `kernel_*` never `EXECUTE` caller input | | |
+
+---
+
+## 10. Findings & sign-off
 
 **Counts:** Pass ____ / Fail ____ / N/A ____  out of the procedures above.
 
@@ -164,4 +222,6 @@ experiment file, or recompute the statistic) — not a stale/aspirational thresh
 ---
 *Generated 2026-05-29 against Trunkit v0.2.4. Reference counts reflect the live
 federation DB at that time; the soundness invariants (§3, §4.2, §5.3, §6.3) are
-state-independent and must hold for any honest snapshot.*
+state-independent and must hold for any honest snapshot. §9 (adversarial/CWE)
+added 2026-05-30 alongside `SECURITY.md`; its **KNOWN GAP** rows are expected to
+be red until probe-sandbox (design A) and ledger-signing (design B) land.*
