@@ -562,3 +562,36 @@ SELECT cl_c.statement AS conclusion, d.rule, array_agg(cl_p.statement) AS premis
 | kan-engine → cert | `cert.kan_engines_all_true()` (step 79) |
 | claim → portable bundle | `cert.export_bundle(ids[])` |
 | bundle claim → verdict | `cert.verify(claim_id)` — no side effects |
+| strat tower/residual → cert | subjects judged by `cert` under the three-valued rule |
+| tel_project → live proof | `cert.subject_probe` + `cert.live_build` gate the probe |
+| competing models → verdict | `cert.crown_consensus(claim, topology)` (OCTT) |
+
+---
+
+## strat — stratification layer (step 92)
+
+Thin layer between `kan` (structure) and `cert` (verdict); makes "classified vs frontier" first-class.
+
+- `strat.site` — a poset/site (`operator_reachability` | `duality` | `construction` | …).
+- `strat.tower` — iterated endofunctor + stabilization depth. **`stab_depth IS NULL` == ∞ / undefined.**
+- `strat.residual` — a frontier residual; `classified_zero` marks 0 as the "nice" case.
+- `strat.tower_depth(orbit, mode)` — shared three-valued depth detector (`'return'` = duality, `'saturate'` = closure).
+
+Three labs are co-resident: interlace (operator closure, depth 61), hypergroup (duality), TEL (construction-dependence).
+
+## Verification methods (2026-05 session)
+
+**Three-valued honesty (governing rule).** `valid` / `refuted` / **`unverified`** — never collapse *unknown / empty / not-yet-built* into a green or a red.
+- `cert.standing` uses LEFT JOIN (step 40): never-checked claims surface, don't vanish.
+- `cert.kan_engines_all_true()` (step 79): empty engine → `unverified`, not `refuted`.
+- `cert.law_view_holds` / `cert.is_perfect` (step 90): equip NULL-probe claims for verification.
+
+**Subject-existence guard (Tier 1, step 93).** `cert.subject_probe` + `tools/tel_subject_guard.py [--repoint]`. A `tel_project` probe gates on subject existence: a moved/deleted subject → `unverified`, never a stale green.
+
+**Live build/test (Tier 2, step 93).** `cert.live_build` + `tools/tel_build_check.py [--only ID]`. "valid" means *built today* (cargo / rebar3 / mix run), not asserted. Toolchain-not-invocable → `unverified` (never a false `refuted`).
+
+**Status board (step 93).** `cert.board` / `cert.board_summary` → plain-language areas + verdicts. `python tools/gen_status.py` regenerates `STATUS.md` — the single layperson surface.
+
+**Crown consensus — OCTT (step 93).** `cert.evidence_vote` + `cert.crown_consensus(claim, topology[, k])`. Competing evidence from different models adjudicated by Open Crown topology (`veto`=max, `parallel`=min, `series`=sum, `threshold`=k-of-n). The partial-closure window → **`contested`** (models disagree; neither fake-green nor flat-refuted). `K*` = evidence budget to close the crown.
+
+**SQL-generation guardrails.** `docs/CERT_SQL_GENERATION_GUARDRAILS.md` — when LLM-generating cert SQL: prune / minify / adaptive-route; **never** identifier-mask or aggressively compress (semantic drift).

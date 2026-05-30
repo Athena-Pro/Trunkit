@@ -38,3 +38,4 @@ test_results.txt
 
 # Accidentally-named venv path fragments
 Users*/
+.curry/
