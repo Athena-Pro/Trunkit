@@ -263,11 +263,11 @@ conn.execute(
 
 | Component | Files | Size |
 |-----------|-------|------|
-| SQL (94 files, 00–97) | 94 | ~534 KB |
-| Python tools | 39 | ~342 KB |
+| SQL (00–96) | 99 | ~603 KB |
+| Python tools | 47 | ~393 KB |
 | Proof scripts | 4 | ~23 KB |
-| Src + tests + config | ~58 | ~483 KB |
-| **Total (no virtualenv)** | **~199** | **~1.4 MB** |
+| Src + tests + config | ~69 | ~558 KB |
+| **Total (no virtualenv)** | **~219** | **~1.5 MB** |
 
 For scale only (not a capability comparison): a Lean 4 toolchain is ≈ 2.9 GB
 per version and a compiled Mathlib ≈ 4–10 GB per project. **Trunkit is not a
