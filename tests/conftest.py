@@ -12,6 +12,11 @@ Marks:
   @pytest.mark.slow         requires generate(limit > 10_000)
   @pytest.mark.primesieve   requires the primesieve CLI on PATH
   @pytest.mark.network      makes real HTTP requests
+
+DB-free modules (test_cert_kernel.py, test_cert_ledger.py — the consumer-side
+kernel/ledger checkers) must not be blocked when no database is reachable: the
+autouse schema fixture below SKIPS rather than ERRORS when the nerode DB is
+unreachable, so those tests run in plain CI without Postgres.
 """
 
 from __future__ import annotations
@@ -40,22 +45,45 @@ def nerode_dsn() -> str:
 
 @pytest.fixture(scope="session", autouse=True)
 def apply_schema_once():
-    with psycopg.connect(NERODE_DSN) as conn:
-        nerode_apply_schema(conn)
+    """Apply the nerode schema once per session, if a database is reachable.
+
+    A short connect timeout keeps DB-free runs fast; on failure we yield without
+    applying so DB-free tests proceed, and DB-backed tests skip individually via
+    the `conn` fixtures below.
+    """
+    try:
+        with psycopg.connect(NERODE_DSN, connect_timeout=3) as conn:
+            nerode_apply_schema(conn)
+    except psycopg.Error:
+        pass
+    yield
+
+
+def _require_db() -> psycopg.Connection:
+    try:
+        return psycopg.connect(NERODE_DSN, autocommit=False, connect_timeout=3)
+    except psycopg.Error as exc:
+        pytest.skip(f"nerode DB not reachable: {exc}")
 
 
 @pytest.fixture
 def conn(apply_schema_once):
-    with psycopg.connect(NERODE_DSN, autocommit=False) as c:
+    c = _require_db()
+    try:
         yield c
         c.rollback()
+    finally:
+        c.close()
 
 
 @pytest.fixture
 def committed_conn(apply_schema_once):
-    with psycopg.connect(NERODE_DSN, autocommit=False) as c:
+    c = _require_db()
+    try:
         yield c
         c.commit()
+    finally:
+        c.close()
 
 
 # ---------------------------------------------------------------------------

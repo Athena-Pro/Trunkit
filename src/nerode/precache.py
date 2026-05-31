@@ -68,12 +68,18 @@ class Precacher:
         session_id: str | None = None,
         *,
         dsn: str | None = None,
+        cert_root: str | None = None,
     ) -> None:
         self.session_id: str = session_id or f"precache-{uuid.uuid4().hex[:8]}"
         self._dsn = dsn or resolve_dsn()
         self._conn: psycopg.Connection | None = None
         self._keys: list[str] = []
         self.envelope: dict | None = None
+        # Cross-layer entanglement: the cert ledger head (cert.ledger_root() in
+        # the Trunkit DB) this handoff was packed against. Embedding it binds the
+        # envelope to a specific proof-ledger state; the trunk side can close the
+        # loop with cert.anchor_external('handoff_envelope', <envelope hash>).
+        self._cert_root = cert_root
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -173,14 +179,22 @@ class Precacher:
         value = with_retry(source, retries=retries)
         self.store(key, value, force_rebuild=force_rebuild)
 
-    def close(self, *, attention_hint: str | None = None) -> dict:
-        """Call nerode.close_session(), commit, and return the envelope dict."""
+    def close(self, *, attention_hint: str | None = None, cert_root: str | None = None) -> dict:
+        """Call nerode.close_session(), commit, and return the envelope dict.
+
+        *cert_root* (or the value passed to __init__) is embedded in the envelope
+        as ``cert_ledger_root`` — the Trunkit cert.ledger_root() this handoff was
+        packed against — entangling the agent handoff with the proof ledger.
+        """
         if self._conn is None:
             raise RuntimeError("Precacher.close() called before connect()")
 
         detail: dict = {}
         if attention_hint:
             detail["attention_hint"] = attention_hint
+        root = cert_root or self._cert_root
+        if root:
+            detail["cert_ledger_root"] = root
 
         row = self._conn.execute(
             "SELECT nerode.close_session(%s, %s::jsonb)",
