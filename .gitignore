@@ -35,6 +35,11 @@ tests/fixtures/oeis/b*.txt
 
 # Local artifacts
 test_results.txt
+results.json
+tools/advanced_results.json
+tools/benchmark_advanced.py
+tools/benchmark_prime.py
+tools/_schema_check.py
 
 # Accidentally-named venv path fragments
 Users*/

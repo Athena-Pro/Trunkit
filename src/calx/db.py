@@ -24,6 +24,17 @@ from psycopg import Connection
 
 SQL_DIR = importlib.resources.files("calx") / "sql"
 
+
+def _numbered_sql_files() -> tuple[str, ...]:
+    return tuple(
+        entry.name
+        for entry in sorted(SQL_DIR.iterdir(), key=lambda path: path.name)
+        if entry.is_file()
+        and entry.suffix == ".sql"
+        and len(entry.name) >= 3
+        and entry.name[:2].isdigit()
+    )
+
 # calx-only DDL (unqualified names; resolve to the `calx` schema via search_path)
 SCHEMA_FILES = (
     "00_rehome_to_calx.sql",
@@ -37,71 +48,7 @@ SCHEMA_FILES = (
 )
 
 # Full unified bootstrap, in order: schemas + re-home, calx DDL, curry, kan, functors.
-UNIFIED_FILES = (
-    "00_rehome_to_calx.sql",
-    *SCHEMA_FILES,
-    "10_curry.sql",
-    "20_kan.sql",
-    "21_kan_functors.sql",
-    "22_kan_elements.sql",
-    "23_kan_monoidal.sql",
-    "24_kan_natural_transformations.sql",
-    "25_kan_extensions.sql",
-    "26_kan_enrichment.sql",
-    "27_kan_profunctors.sql",
-    "28_kan_adjunctions.sql",
-    "30_kan_corpus.sql",
-    "40_cert.sql",
-    "41_cert_formal.sql",
-    "42_cert_gap_homology.sql",
-    "43_kan_sequence_homology.sql",
-    "44_cert_seq_homology.sql",
-    "45_kan_factorial_homology.sql",
-    "46_cert_factorial_homology.sql",
-    "47_kan_combined_signature.sql",
-    "48_cert_combined.sql",
-    "49_kan_shared_prime_betti.sql",
-    "50_cert_combined_scale.sql",
-    "51_cert_shared_prime_h2.sql",
-    "52_cert_developed_sequence.sql",
-    "53_cert_omega_family.sql",
-    "54_cert_omega_family_succ.sql",
-    "55_kan_prime_members.sql",
-    "56_cert_prime_members_functor.sql",
-    "57_kan_strata_tower.sql",
-    "58_cert_strata_tower.sql",
-    "59_kan_grading.sql",
-    "60_cert_grading.sql",
-    "61_kan_identity_decomposition.sql",
-    "62_cert_identity_decomposition.sql",
-    "63_kan_bigrading.sql",
-    "64_cert_bigrading.sql",
-    "65_kan_chromatic.sql",
-    "66_cert_chromatic.sql",
-    "67_kan_lithon.sql",
-    "68_cert_lithon.sql",
-    "69_kan_shadow.sql",
-    "70_cert_shadow.sql",
-    "71_kan_self_syzygy.sql",
-    "72_cert_self_syzygy.sql",
-    "73_kan_self_shadow.sql",
-    "74_cert_self_shadow.sql",
-    "75_kan_f1_radix.sql",
-    "76_cert_f1_radix.sql",
-    "77_kan_moonshine.sql",
-    "78_cert_moonshine.sql",
-    "79_cert_kan_engines.sql",
-    "80_kan_colimit_closure.sql",
-    "81_cert_colimit_closure.sql",
-    "82_kan_equipment.sql",
-    "83_cert_equipment.sql",
-    "84_cert_witness.sql",
-    "85_cert_derivation.sql",
-    "86_cert_verify.sql",
-    "87_cert_export_bundle.sql",
-    "88_cert_witness_carry.sql",
-    "89_nerode_bridge.sql",
-)
+UNIFIED_FILES = _numbered_sql_files()
 
 # Applied per-session so a fresh-DB bootstrap creates calx objects in `calx`
 # (ALTER ROLE in 00_rehome only affects *future* sessions).

@@ -28,16 +28,17 @@ Acceptance logic of the composite:
 
 from __future__ import annotations
 
-import pytest
 import psycopg
+import pytest
 
+from tests.dbskip import connect_or_skip
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _fresh(dsn: str) -> psycopg.Connection:
-    return psycopg.connect(dsn, autocommit=True)
+    return connect_or_skip(dsn, autocommit=True)
 
 
 def _dfa_id(conn, name: str) -> int:

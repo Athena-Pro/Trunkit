@@ -29,11 +29,17 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Any, Iterator
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
+
+SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+src_dir_str = str(SRC_DIR)
+if src_dir_str not in sys.path:
+    sys.path.insert(0, src_dir_str)
 
 from nerode.automata import export_from_db, print_transition_table
-from nerode.db import connect, resolve_dsn, TRUNKIT_DSN
-
+from nerode.db import TRUNKIT_DSN, connect, resolve_dsn
 
 # ---------------------------------------------------------------------------
 # Core handler
@@ -61,7 +67,6 @@ def handle_nerode_query(spec: str, dsn: str | None = None) -> dict[str, Any]:
       automaton_json (canonical JSON export),
       cert_claim_id.
     """
-    import json as _json
     dsn = dsn or resolve_dsn()
     with connect(dsn) as conn:
         # 1. Build minimal DFA

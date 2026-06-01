@@ -43,8 +43,14 @@ from __future__ import annotations
 import json
 import sys
 from datetime import date
+from pathlib import Path
 
 import psycopg
+
+SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+src_dir_str = str(SRC_DIR)
+if src_dir_str not in sys.path:
+    sys.path.insert(0, src_dir_str)
 
 from nerode.db import resolve_dsn
 from nerode.precache import Precacher
@@ -186,7 +192,7 @@ def main() -> None:
         )
         print("ok")
 
-        print(f"  fetching AAPL 5d history ...", end=" ", flush=True)
+        print("  fetching AAPL 5d history ...", end=" ", flush=True)
         pc.fetch(
             f"metric:AAPL:5d:{TODAY}",
             TickerHistorySource("AAPL", range_="5d"),
@@ -252,7 +258,7 @@ def main() -> None:
         state = composite_dfa_state(conn, SESSION_A, COMPOSITE_NAME)
 
     print(f"\n  DFA:        {COMPOSITE_NAME}")
-    print(f"  Pattern:    A_{{5,}} AND (UD){{3,}}  (oscillating AND unresponsive)")
+    print("  Pattern:    A_{5,} AND (UD){3,}  (oscillating AND unresponsive)")
     print(f"  Input:      {state.get('input')}")
     print(f"  State:      {state.get('state_id')}  ({state.get('label')})")
     print(f"  Accepting:  {state.get('accepting')}")

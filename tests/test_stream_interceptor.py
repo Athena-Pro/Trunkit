@@ -19,6 +19,8 @@ import sys
 
 import pytest
 
+from tests.dbskip import connect_or_skip
+
 # Load the interceptor module via path (it lives in tools/, not src/)
 _TOOLS_DIR = pathlib.Path(__file__).parent.parent / "tools"
 _spec = importlib.util.spec_from_file_location(
@@ -39,16 +41,22 @@ process_stream      = _stream_mod.process_stream
 @pytest.fixture(scope="module")
 def result_astar_bplus(nerode_dsn):
     """Build a*b+ once and cache for the module."""
+    with connect_or_skip(nerode_dsn, autocommit=True):
+        pass
     return handle_nerode_query("a*b+", dsn=nerode_dsn)
 
 
 @pytest.fixture(scope="module")
 def result_ab_star(nerode_dsn):
+    with connect_or_skip(nerode_dsn, autocommit=True):
+        pass
     return handle_nerode_query("(ab)*", dsn=nerode_dsn)
 
 
 @pytest.fixture(scope="module")
 def result_ends_ab(nerode_dsn):
+    with connect_or_skip(nerode_dsn, autocommit=True):
+        pass
     return handle_nerode_query("(a|b)*ab", dsn=nerode_dsn)
 
 
@@ -200,8 +208,7 @@ class TestHandleNerodeQueryCert:
     """
 
     def _read_conn(self, nerode_dsn):
-        import psycopg
-        return psycopg.connect(nerode_dsn, autocommit=True)
+        return connect_or_skip(nerode_dsn, autocommit=True)
 
     def test_cert_claim_written(self, result_astar_bplus, nerode_dsn):
         with self._read_conn(nerode_dsn) as c:
@@ -238,6 +245,8 @@ class TestHandleNerodeQueryCert:
 
     def test_idempotent_cert_claim(self, nerode_dsn):
         """Calling handle_nerode_query twice for the same regex produces consistent results."""
+        with connect_or_skip(nerode_dsn, autocommit=True):
+            pass
         r1 = handle_nerode_query("b*a+", dsn=nerode_dsn)
         r2 = handle_nerode_query("b*a+", dsn=nerode_dsn)
         assert r1["state_count"] == r2["state_count"]
@@ -254,6 +263,12 @@ class TestProcessStream:
     """Stream filter: pass-through and tool injection."""
 
     def _run_stream(self, events: list[dict], dsn: str) -> list[dict]:
+        if any(
+            event.get("type") == "tool_call" and event.get("tool") == "nerode_query"
+            for event in events
+        ):
+            with connect_or_skip(dsn, autocommit=True):
+                pass
         in_text  = "\n".join(json.dumps(e) for e in events) + "\n"
         in_buf   = io.StringIO(in_text)
         out_buf  = io.StringIO()

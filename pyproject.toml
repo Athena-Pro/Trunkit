@@ -54,6 +54,10 @@ nerode  = "nerode.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/calx", "src/nerode"]
 
+[tool.hatch.build.targets.wheel.shared-data]
+"tools" = "share/trunkit/tools"
+"proofs" = "share/trunkit/proofs"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
