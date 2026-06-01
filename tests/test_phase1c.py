@@ -23,6 +23,7 @@ import psycopg
 import pytest
 
 from nerode.db import apply_schema
+from tests.dbskip import connect_or_skip
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -42,7 +43,7 @@ _PAIRS = [
 
 @pytest.fixture(scope="module")
 def conn():
-    c = psycopg.connect(DSN)
+    c = connect_or_skip(DSN)
     apply_schema(c)
     yield c
     c.rollback()

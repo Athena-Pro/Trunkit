@@ -15,11 +15,12 @@ DFA reference:
 
 from __future__ import annotations
 
-import pytest
 import psycopg
+import pytest
 
 from nerode.automata import import_to_db
 from nerode.db import apply_schema, connect
+from tests.dbskip import connect_or_skip
 
 DSN = "postgresql://nerode:nerode@localhost:5435/nerode"
 
@@ -73,7 +74,7 @@ MINIMAL_DFA = {
 
 @pytest.fixture(scope="module")
 def conn():
-    c = psycopg.connect(DSN)
+    c = connect_or_skip(DSN)
     apply_schema(c)
     yield c
     c.rollback()

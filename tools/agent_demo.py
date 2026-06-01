@@ -26,11 +26,16 @@ the grounding benefit is directly visible.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import textwrap
+from pathlib import Path
 from typing import Any
+
+SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+src_dir_str = str(SRC_DIR)
+if src_dir_str not in sys.path:
+    sys.path.insert(0, src_dir_str)
 
 # ---------------------------------------------------------------------------
 # Language menu
@@ -164,8 +169,10 @@ def _render_tool_result(result: dict[str, Any]) -> str:
 
 def run_grounded(lang: dict, dsn: str | None, verbose: bool) -> str:
     """Run a full Gemini turn with the nerode_query tool active."""
+    import importlib.util
+    import pathlib
+
     from google.genai import types
-    import importlib.util, pathlib
     _si = importlib.util.spec_from_file_location(
         "stream_interceptor",
         pathlib.Path(__file__).parent / "stream_interceptor.py"

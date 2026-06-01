@@ -21,6 +21,7 @@ import psycopg
 
 from nerode.automata import import_to_db
 from nerode.db import apply_schema
+from tests.dbskip import connect_or_skip
 
 DSN = "postgresql://nerode:nerode@localhost:5435/nerode"
 
@@ -86,7 +87,7 @@ import pytest
 
 @pytest.fixture(scope="module")
 def conn():
-    c = psycopg.connect(DSN)
+    c = connect_or_skip(DSN)
     apply_schema(c)
     yield c
     c.rollback()

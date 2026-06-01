@@ -11,13 +11,14 @@ from __future__ import annotations
 import psycopg
 import pytest
 
+from tests.dbskip import connect_or_skip
 
 # ---------------------------------------------------------------------------
 # Module-scoped helpers to avoid rebuilding DFA fixtures repeatedly
 # ---------------------------------------------------------------------------
 
 def _fetch_one(dsn: str, sql: str, params=()):
-    with psycopg.connect(dsn) as c:
+    with connect_or_skip(dsn) as c:
         row = c.execute(sql, params).fetchone()
     return row
 
@@ -507,7 +508,10 @@ class TestMorphismCLI:
     def test_cmd_morphisms_output(self, nerode_dsn, capsys):
         """cmd_morphisms prints a line count header and rows."""
         import argparse
+
         from nerode.cli import cmd_morphisms
+        with connect_or_skip(nerode_dsn):
+            pass
         args = argparse.Namespace(dsn=nerode_dsn)
         cmd_morphisms(args)
         captured = capsys.readouterr()
@@ -519,7 +523,10 @@ class TestMorphismCLI:
     def test_cmd_morphisms_contains_epimorphism(self, nerode_dsn, capsys):
         """The morphisms output includes at least one 'epimorphism' row."""
         import argparse
+
         from nerode.cli import cmd_morphisms
+        with connect_or_skip(nerode_dsn):
+            pass
         args = argparse.Namespace(dsn=nerode_dsn)
         cmd_morphisms(args)
         captured = capsys.readouterr()

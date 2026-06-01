@@ -98,8 +98,7 @@ python scripts/morning_brief_demo.py
 
 ```bash
 # Install
-pip install trunkit   # proof kernel
-pip install nerode    # automata + porter layer
+pip install trunkit   # installs both the trunkit and nerode CLIs
 ```
 
 Environment variable: `CALX_DSN=postgresql://trunk:trunk@localhost:5434/trunk`

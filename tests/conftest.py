@@ -23,10 +23,17 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
+from pathlib import Path
 
 import psycopg
 import pytest
 from psycopg import Connection
+
+SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+src_dir_str = str(SRC_DIR)
+if src_dir_str not in sys.path:
+    sys.path.insert(0, src_dir_str)
 
 from nerode.db import apply_schema as nerode_apply_schema
 from nerode.db import resolve_dsn as nerode_resolve_dsn
