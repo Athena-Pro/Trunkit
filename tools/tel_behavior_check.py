@@ -26,28 +26,55 @@ def telc_bin(repo):
     return None
 
 
+PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+
+
+def artifact_ok(path):
+    """Verify a produced artifact exists and, for .png, is a real PNG. Returns
+    (ok, detail)."""
+    if not os.path.isfile(path):
+        return False, f"artifact not produced: {path}"
+    if path.lower().endswith(".png"):
+        with open(path, "rb") as f:
+            head = f.read(8)
+        if head != PNG_MAGIC:
+            return False, f"artifact is not a valid PNG: {path}"
+        size = os.path.getsize(path)
+        return True, f"valid PNG, {size} bytes"
+    return True, f"artifact present, {os.path.getsize(path)} bytes"
+
+
 with psycopg.connect(DSN) as conn, conn.cursor() as cur:
     cur.execute(
-        "SELECT id, subject_ref->>'repo', subject_ref->>'program', subject_ref->>'expect' "
-        "FROM cert.claim WHERE subject_kind='tel_behavior' ORDER BY id"
+        "SELECT id, subject_ref->>'repo', subject_ref->>'program', subject_ref->>'expect', "
+        "subject_ref->>'produces' "
+        "FROM cert.claim WHERE subject_kind IN ('tel_behavior','tel_graphics') ORDER BY id"
     )
     rows = [r for r in cur.fetchall() if ONLY is None or r[0] == ONLY]
-    for cid, repo, program, expect in rows:
+    for cid, repo, program, expect, produces in rows:
         binp = telc_bin(repo or "")
         prog_path = os.path.join(repo or "", program or "")
+        art_path = os.path.join(repo or "", produces) if produces else None
         if not binp or not os.path.isfile(prog_path):
             status, detail = "unverified", f"missing telc binary or program ({binp}, {prog_path})"
         else:
             try:
+                if art_path and os.path.isfile(art_path):
+                    os.remove(art_path)        # ensure the run actually re-creates it
                 p = subprocess.run(
                     [binp, prog_path, "--interpret"],
+                    cwd=repo,  # so a program's relative output paths resolve under the repo
                     capture_output=True, text=True, timeout=TIMEOUT,
                     stdin=subprocess.DEVNULL,
                 )
                 out = (p.stdout or "") + (p.stderr or "")
                 ok = (p.returncode == 0) and (expect in out)
+                detail = out[-260:]
+                if ok and art_path:
+                    a_ok, a_detail = artifact_ok(art_path)
+                    ok = ok and a_ok
+                    detail = f"{a_detail} | {detail}"
                 status = "valid" if ok else "failed"
-                detail = out[-300:]
             except subprocess.TimeoutExpired:
                 status, detail = "unverified", f"timeout after {TIMEOUT}s"
             except Exception as e:  # noqa: BLE001
