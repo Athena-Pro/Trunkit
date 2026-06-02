@@ -29,6 +29,7 @@ CREATE OR REPLACE VIEW cert.board AS
 SELECT cl.id AS claim_id,
   CASE
     WHEN cl.subject_kind='tel_project' THEN 'TEL builds'
+    WHEN cl.subject_kind='tel_behavior' THEN 'TEL behavior'
     WHEN cl.subject_kind IN ('tel_claim','number_fact','repo_layout') THEN 'TEL results & hygiene'
     WHEN cl.subject_kind IN ('duality_depth','operator_graph','frontier_residual') THEN 'Cross-lab structures'
     WHEN cl.subject_kind IN ('trunkit_method','cert_soundness') THEN 'Methods & self-checks'
