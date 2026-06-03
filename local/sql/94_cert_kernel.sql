@@ -298,6 +298,97 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
+-- DFA / graph Betti certificate (the LQLE topological-invariant bridge):
+--   {"schema":"dfa_betti","V":4,"edges":[[0,1],[1,2],[2,0],[3,3]],
+--    "asserts":{"beta0":2,"beta1":2}}
+-- A DFA transition graph is a 1-complex: states = vertices, transitions = edges
+-- (self-loops and parallel edges count). Its homology is fully determined by
+--   beta0 = connected components (undirected)
+--   beta1 = E - V + beta0   (circuit rank — independent cycles)
+--   chi   = V - E = beta0 - beta1   (beta_n = 0 for n >= 2)
+-- Building/minimizing the DFA is the work; verifying its Betti signature is one
+-- union-find pass over the edge list — the canonical untrusted-certificate split.
+CREATE OR REPLACE FUNCTION cert.kernel_dfa_betti(p_witness JSONB)
+RETURNS TABLE (ok BOOLEAN, evidence JSONB) LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE
+    v_V   INT;
+    edges JSONB;
+    e     JSONB;
+    u INT; w INT; ru INT; rw INT;
+    parent INT[];
+    n_edges INT := 0;
+    v_comp INT;
+    v_beta0 INT; v_beta1 INT; v_chi INT;
+    v_ok BOOLEAN := TRUE;
+    i INT;
+BEGIN
+    IF p_witness IS NULL OR (p_witness->>'V') IS NULL
+       OR jsonb_typeof(p_witness->'edges') <> 'array' THEN
+        RETURN QUERY SELECT NULL::BOOLEAN,
+            jsonb_build_object('error', 'missing V or !array edges');
+        RETURN;
+    END IF;
+
+    v_V := (p_witness->>'V')::INT;
+    IF v_V < 1 THEN
+        RETURN QUERY SELECT NULL::BOOLEAN,
+            jsonb_build_object('error', 'V must be >= 1');
+        RETURN;
+    END IF;
+    edges := p_witness->'edges';
+
+    -- union-find over vertices 0..V-1
+    parent := ARRAY(SELECT g FROM generate_series(0, v_V - 1) AS g);  -- parent[k] at index k+1
+
+    FOR e IN SELECT * FROM jsonb_array_elements(edges) LOOP
+        u := (e->>0)::INT;
+        w := (e->>1)::INT;
+        IF u < 0 OR u >= v_V OR w < 0 OR w >= v_V THEN
+            RETURN QUERY SELECT NULL::BOOLEAN,
+                jsonb_build_object('error', format('edge endpoint out of range: [%s,%s]', u, w));
+            RETURN;
+        END IF;
+        n_edges := n_edges + 1;
+        -- find(u)
+        ru := u;
+        WHILE parent[ru + 1] <> ru LOOP ru := parent[ru + 1]; END LOOP;
+        -- find(w)
+        rw := w;
+        WHILE parent[rw + 1] <> rw LOOP rw := parent[rw + 1]; END LOOP;
+        IF ru <> rw THEN parent[ru + 1] := rw; END IF;
+    END LOOP;
+
+    -- count distinct roots
+    v_comp := 0;
+    FOR i IN 0 .. v_V - 1 LOOP
+        ru := i;
+        WHILE parent[ru + 1] <> ru LOOP ru := parent[ru + 1]; END LOOP;
+        IF ru = i THEN v_comp := v_comp + 1; END IF;
+    END LOOP;
+
+    v_beta0 := v_comp;
+    v_beta1 := n_edges - v_V + v_beta0;   -- circuit rank
+    v_chi   := v_V - n_edges;
+
+    IF p_witness->'asserts' ? 'beta0' THEN
+        v_ok := v_ok AND (v_beta0 = (p_witness#>>'{asserts,beta0}')::INT);
+    END IF;
+    IF p_witness->'asserts' ? 'beta1' THEN
+        v_ok := v_ok AND (v_beta1 = (p_witness#>>'{asserts,beta1}')::INT);
+    END IF;
+    IF p_witness->'asserts' ? 'chi' THEN
+        v_ok := v_ok AND (v_chi = (p_witness#>>'{asserts,chi}')::INT);
+    END IF;
+
+    RETURN QUERY SELECT v_ok, jsonb_build_object(
+        'kernel', 'dfa_betti',
+        'V', v_V, 'E', n_edges,
+        'beta0', v_beta0, 'beta1', v_beta1, 'euler_char', v_chi);
+EXCEPTION WHEN OTHERS THEN
+    RETURN QUERY SELECT NULL::BOOLEAN, jsonb_build_object('error', SQLERRM);
+END;
+$$;
+
 -- ---------------------------------------------------------------------------
 -- 2. kernel registry + dispatcher
 -- ---------------------------------------------------------------------------
@@ -322,7 +413,11 @@ INSERT INTO cert.kernel (schema, checker_fn, description) VALUES
     ('matrix_word', 'cert.kernel_matrix_word',
      'Multiply the generator matrices in word order and compare to target. '
      'Independent of, and far cheaper than, solving matrix-semigroup membership / '
-     'the word problem (cf. arXiv:2604.15386).')
+     'the word problem (cf. arXiv:2604.15386).'),
+    ('dfa_betti', 'cert.kernel_dfa_betti',
+     'Recompute the Betti signature (beta0,beta1,chi) of a DFA/graph from its '
+     'edge list (beta0 via union-find; beta1 = E-V+beta0). Independent of, and '
+     'far cheaper than, building/minimizing the automaton (LQLE topological bridge).')
 ON CONFLICT (schema) DO UPDATE
     SET checker_fn = EXCLUDED.checker_fn, description = EXCLUDED.description;
 

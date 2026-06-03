@@ -186,8 +186,23 @@ def _cmd_witness(args: argparse.Namespace) -> int:
 
 def _cmd_init(args: argparse.Namespace) -> int:
     with db.connect(args.dsn) as conn:
-        db.apply_schema(conn)
+        db.apply_unified(conn)
     print("schema applied")
+    if args.local:
+        import pathlib
+        ext_dir = pathlib.Path(args.local)
+        if not ext_dir.is_dir():
+            print(f"  warning: --local path {ext_dir} does not exist, skipping")
+            return 0
+        with db.connect(args.dsn) as conn:
+            applied = db.apply_extensions(conn, ext_dir)
+        if applied:
+            print(f"  extensions applied ({len(applied)}):")
+            for f in applied:
+                print(f"    {f}")
+        else:
+            print("  (no numbered SQL files found in extension directory)")
+    return 0
     return 0
 
 
@@ -337,7 +352,13 @@ def build_parser() -> argparse.ArgumentParser:
     wi.set_defaults(func=_cmd_witness)
 
     # --- calx data ---
-    sub.add_parser("init", help="apply schema/views/procedures").set_defaults(func=_cmd_init)
+    ini = sub.add_parser("init", help="apply core schema; optionally load local extensions")
+    ini.add_argument(
+        "--local", metavar="DIR", default=None,
+        help="also apply numbered SQL files from DIR after the core schema "
+             "(e.g. trunkit init --local local/sql)",
+    )
+    ini.set_defaults(func=_cmd_init)
 
     g = sub.add_parser("generate", help="populate integer tables up to --limit")
     g.add_argument("--limit", type=int, required=True)

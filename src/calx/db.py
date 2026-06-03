@@ -94,6 +94,34 @@ def apply_schema(conn: Connection, files: tuple[str, ...] = SCHEMA_FILES) -> Non
             cur.execute(path.read_text(encoding="utf-8"))
 
 
+def apply_extensions(conn: Connection, ext_dir: str | os.PathLike) -> list[str]:
+    """Apply numbered SQL files from *ext_dir* (e.g. ``local/sql/``) in filename order.
+
+    Only files whose names begin with two digits (``NN_*.sql``) are loaded —
+    the same convention as the core schema files.  Files are applied inside a
+    single transaction so a failure rolls back the whole extension batch.
+
+    Returns the list of filenames actually executed (useful for diagnostics).
+    """
+    import pathlib
+
+    ext_path = pathlib.Path(ext_dir)
+    sql_files = sorted(
+        p for p in ext_path.iterdir()
+        if p.is_file() and p.suffix == ".sql"
+        and len(p.name) >= 3 and p.name[:2].isdigit()
+    )
+    if not sql_files:
+        return []
+    applied: list[str] = []
+    with conn.cursor() as cur:
+        cur.execute(f"SET search_path = {SEARCH_PATH}")
+        for p in sql_files:
+            cur.execute(p.read_text(encoding="utf-8"))
+            applied.append(p.name)
+    return applied
+
+
 def apply_unified(conn: Connection, *, sync_kan: bool = True) -> None:
     """Bootstrap the full unified model: schemas, calx, curry, kan.
 
