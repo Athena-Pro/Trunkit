@@ -4,7 +4,7 @@
 
 ## Headline
 
-**✅ 180 verified · ❌ 0 failed · ❓ 23 unknown** &nbsp;(of 203 tracked claims)
+**✅ 184 verified · ❌ 0 failed · ❓ 22 unknown** &nbsp;(of 206 tracked claims)
 
 > 89% of everything tracked is independently verified right now.
 
@@ -13,7 +13,7 @@
 | Area | ✅ verified | ❌ failed | ❓ unknown |
 |---|---:|---:|---:|
 | Cross-lab structures | 3 | 0 | 1 |
-| Curry (provenance) | 0 | 0 | 2 |
+| Curry (provenance) | 4 | 0 | 1 |
 | Math: homology | 1 | 0 | 3 |
 | Math: kan engines | 13 | 0 | 9 |
 | Methods & self-checks | 7 | 0 | 0 |
