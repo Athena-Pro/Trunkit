@@ -1,10 +1,10 @@
 # Federation Status Board
 
-*One board for everything. Generated 2026-06-02 from the Trunkit cert ledger (`cert.board`). Green = checked & true, red = checked & false, grey = not yet checkable.*
+*One board for everything. Generated 2026-06-03 from the Trunkit cert ledger (`cert.board`). Green = checked & true, red = checked & false, grey = not yet checkable.*
 
 ## Headline
 
-**✅ 171 verified · ❌ 8 failed · ❓ 21 unknown** &nbsp;(of 200 tracked claims)
+**✅ 172 verified · ❌ 8 failed · ❓ 21 unknown** &nbsp;(of 201 tracked claims)
 
 > 86% of everything tracked is independently verified right now.
 
@@ -21,7 +21,7 @@
 | TEL behavior | 3 | 0 | 0 |
 | TEL builds | 8 | 0 | 0 |
 | TEL constants | 1 | 0 | 0 |
-| TEL graphics | 2 | 0 | 0 |
+| TEL graphics | 3 | 0 | 0 |
 | TEL results & hygiene | 5 | 0 | 0 |
 
 ## ❌ Needs attention (checked & failed)
