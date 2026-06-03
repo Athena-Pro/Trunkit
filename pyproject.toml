@@ -53,6 +53,13 @@ nerode  = "nerode.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/calx", "src/nerode"]
+# Exclude local workspace WIP files that may be present on disk but are
+# not part of the public library (untracked, in-progress SQL).
+exclude = [
+    "src/calx/sql/9[4-9]_*.sql",   # anything ≥94 is local workspace only
+    "src/calx/kernel.py",           # in-development module, not released yet
+    "local/",
+]
 
 [tool.hatch.build.targets.wheel.shared-data]
 "tools"  = "share/trunkit/tools"
