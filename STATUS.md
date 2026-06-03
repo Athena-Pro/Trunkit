@@ -4,9 +4,9 @@
 
 ## Headline
 
-**✅ 178 verified · ❌ 4 failed · ❓ 21 unknown** &nbsp;(of 203 tracked claims)
+**✅ 180 verified · ❌ 0 failed · ❓ 23 unknown** &nbsp;(of 203 tracked claims)
 
-> 88% of everything tracked is independently verified right now.
+> 89% of everything tracked is independently verified right now.
 
 ## By area
 
@@ -17,19 +17,12 @@
 | Math: homology | 1 | 0 | 3 |
 | Math: kan engines | 13 | 0 | 9 |
 | Methods & self-checks | 7 | 0 | 0 |
-| Other | 132 | 4 | 6 |
+| Other | 134 | 0 | 8 |
 | TEL behavior | 3 | 0 | 0 |
 | TEL builds | 8 | 0 | 0 |
 | TEL constants | 1 | 0 | 0 |
 | TEL graphics | 5 | 0 | 0 |
 | TEL results & hygiene | 5 | 0 | 0 |
-
-## ❌ Needs attention (checked & failed)
-
-- **[Other]** mdl_renorm_experiment: median delta_codelength > 0 near mu_inf (renorm model compresse
-- **[Other]** bic_comparison_experiment: near.mean_delta is a finite real number
-- **[Other]** bic_comparison_experiment: far.median_delta is a well-defined finite real (not NaN)
-- **[Other]** invariance_harness_mdl_FIXED: all_codelengths_positive=true (negative codelengths are 
 
 ## What the colours mean
 
