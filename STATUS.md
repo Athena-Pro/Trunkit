@@ -4,9 +4,9 @@
 
 ## Headline
 
-**✅ 176 verified · ❌ 6 failed · ❓ 21 unknown** &nbsp;(of 203 tracked claims)
+**✅ 178 verified · ❌ 4 failed · ❓ 21 unknown** &nbsp;(of 203 tracked claims)
 
-> 87% of everything tracked is independently verified right now.
+> 88% of everything tracked is independently verified right now.
 
 ## By area
 
@@ -15,9 +15,9 @@
 | Cross-lab structures | 3 | 0 | 1 |
 | Curry (provenance) | 0 | 0 | 2 |
 | Math: homology | 1 | 0 | 3 |
-| Math: kan engines | 12 | 1 | 9 |
+| Math: kan engines | 13 | 0 | 9 |
 | Methods & self-checks | 7 | 0 | 0 |
-| Other | 131 | 5 | 6 |
+| Other | 132 | 4 | 6 |
 | TEL behavior | 3 | 0 | 0 |
 | TEL builds | 8 | 0 | 0 |
 | TEL constants | 1 | 0 | 0 |
@@ -26,8 +26,6 @@
 
 ## ❌ Needs attention (checked & failed)
 
-- **[Math: kan engines]** kan functor curry_to_calx maps exactly 19 objects
-- **[Other]** corpus contains lit_displayed_type_theory (Kolomatskaia–Shulman)
 - **[Other]** mdl_renorm_experiment: median delta_codelength > 0 near mu_inf (renorm model compresse
 - **[Other]** bic_comparison_experiment: near.mean_delta is a finite real number
 - **[Other]** bic_comparison_experiment: far.median_delta is a well-defined finite real (not NaN)
