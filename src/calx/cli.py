@@ -62,10 +62,10 @@ def _cmd_standing(args: argparse.Namespace) -> int:
     if args.status:
         where.append("status = %s")
         params.append(args.status)
-    sql = "SELECT id, statement, method, status, checked_at FROM cert.standing"
+    sql = "SELECT claim_id, statement, method, status, checked_at FROM cert.standing"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY id"
+    sql += " ORDER BY claim_id"
     with db.connect(args.dsn) as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         rows = cur.fetchall()
