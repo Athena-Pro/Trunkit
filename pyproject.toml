@@ -55,8 +55,12 @@ nerode  = "nerode.cli:main"
 packages = ["src/calx", "src/nerode"]
 
 [tool.hatch.build.targets.wheel.shared-data]
-"tools" = "share/trunkit/tools"
+"tools"  = "share/trunkit/tools"
 "proofs" = "share/trunkit/proofs"
+
+# local/ is explicitly excluded from the public wheel — it is a workspace
+# extension overlay for project-specific SQL, tools and planning docs.
+# Users add their own extensions there; they are never published.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

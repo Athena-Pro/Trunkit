@@ -46,3 +46,7 @@ Users*/
 .curry/
 
 .pr_body.md
+
+# Local workspace extensions (not part of the public library)
+local/
+corpus/
