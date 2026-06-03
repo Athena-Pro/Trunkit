@@ -1,12 +1,12 @@
 # Federation Status Board
 
-*One board for everything. Generated 2026-05-29 from the Trunkit cert ledger (`cert.board`). Green = checked & true, red = checked & false, grey = not yet checkable.*
+*One board for everything. Generated 2026-06-02 from the Trunkit cert ledger (`cert.board`). Green = checked & true, red = checked & false, grey = not yet checkable.*
 
 ## Headline
 
-**✅ 164 verified · ❌ 8 failed · ❓ 16 unknown** &nbsp;(of 188 tracked claims)
+**✅ 171 verified · ❌ 8 failed · ❓ 21 unknown** &nbsp;(of 200 tracked claims)
 
-> 87% of everything tracked is independently verified right now.
+> 86% of everything tracked is independently verified right now.
 
 ## By area
 
@@ -17,8 +17,11 @@
 | Math: homology | 1 | 0 | 3 |
 | Math: kan engines | 12 | 1 | 9 |
 | Methods & self-checks | 7 | 0 | 0 |
-| Other | 128 | 7 | 1 |
+| Other | 129 | 7 | 6 |
+| TEL behavior | 3 | 0 | 0 |
 | TEL builds | 8 | 0 | 0 |
+| TEL constants | 1 | 0 | 0 |
+| TEL graphics | 2 | 0 | 0 |
 | TEL results & hygiene | 5 | 0 | 0 |
 
 ## ❌ Needs attention (checked & failed)
