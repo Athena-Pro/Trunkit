@@ -4,7 +4,7 @@
 
 ## Headline
 
-**✅ 172 verified · ❌ 8 failed · ❓ 21 unknown** &nbsp;(of 201 tracked claims)
+**✅ 174 verified · ❌ 8 failed · ❓ 21 unknown** &nbsp;(of 203 tracked claims)
 
 > 86% of everything tracked is independently verified right now.
 
@@ -21,7 +21,7 @@
 | TEL behavior | 3 | 0 | 0 |
 | TEL builds | 8 | 0 | 0 |
 | TEL constants | 1 | 0 | 0 |
-| TEL graphics | 3 | 0 | 0 |
+| TEL graphics | 5 | 0 | 0 |
 | TEL results & hygiene | 5 | 0 | 0 |
 
 ## ❌ Needs attention (checked & failed)

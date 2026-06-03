@@ -31,7 +31,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DSN = "postgresql://trunk:trunk@localhost:5434/trunk"
 
 # subject_kind values that belong to the TEL capability tree
-TEL_KINDS = ("tel_project", "tel_behavior", "tel_graphics", "tel_constants", "tel_calx_live")
+TEL_KINDS = ("tel_project", "tel_behavior", "tel_graphics", "tel_constants", "tel_calx_live", "tel_visuals_live")
 
 # Board area prefixes that correspond to TEL (used for the summary table)
 TEL_AREA_PREFIX = "TEL"
@@ -164,6 +164,7 @@ def main() -> int:
         os.path.join(HERE, "tel_behavior_check.py"),
         os.path.join(HERE, "tel_constants_check.py"),
         os.path.join(HERE, "tel_calx_live_check.py"),
+        os.path.join(HERE, "tel_visuals_live_check.py"),
     ]
 
     # ---- 1. Run checkers -------------------------------------------------
