@@ -24,6 +24,7 @@ Global flags
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from typing import Any
@@ -36,6 +37,18 @@ from .db import TRUNKIT_DSN, apply_schema, connect, resolve_dsn
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _utf8_stdio() -> None:
+    """Emit UTF-8 regardless of console code page.
+
+    Windows cp1252 consoles otherwise raise UnicodeEncodeError on the
+    → / ✓ / × marks used in transition tables and --help text.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            with contextlib.suppress(ValueError, OSError):
+                stream.reconfigure(encoding="utf-8", errors="replace")
 
 
 def _die(msg: str) -> None:
@@ -60,9 +73,9 @@ def cmd_build(args: argparse.Namespace) -> None:
             (args.regex, args.name),
         ).fetchone()
         auto_id: int = row[0]
-        print(f"automaton id: {auto_id}")
 
         if args.write:
+            print(f"automaton id: {auto_id}")
             claim_id: int = conn.execute(
                 "SELECT nerode.certify(%s,'from_regex',"
                 "jsonb_build_object('pattern',%s),'construction_record',"
@@ -72,7 +85,11 @@ def cmd_build(args: argparse.Namespace) -> None:
             print(f"cert claim id: {claim_id}")
 
         data = export_from_db(conn, auto_id)
-        conn.commit()
+        if args.write:
+            conn.commit()
+        else:
+            conn.rollback()
+            print("dry-run: automaton not persisted (pass --write to record)")
 
     print_transition_table(data)
 
@@ -94,8 +111,10 @@ def cmd_min(args: argparse.Namespace) -> None:
                 (args.id,),
             ).fetchone()
             print(f"cert claim id: {row2[1]}")
-
-        conn.commit()
+            conn.commit()
+        else:
+            conn.rollback()
+            print("dry-run: minimized automaton not persisted (pass --write to record)")
 
 
 def cmd_equiv(args: argparse.Namespace) -> None:
@@ -348,12 +367,14 @@ def build_parser() -> argparse.ArgumentParser:
     pb = sub.add_parser("build", help="Regex → minimal DFA.")
     pb.add_argument("--regex", required=True, metavar="PATTERN")
     pb.add_argument("--name", metavar="NAME")
-    pb.add_argument("--write", action="store_true", help="Issue a cert.claim.")
+    pb.add_argument("--write", action="store_true",
+                    help="Persist the automaton and issue a cert.claim (dry-run without).")
 
     # min
     pm = sub.add_parser("min", help="Minimize a DFA (Hopcroft).")
     pm.add_argument("id", type=int, metavar="ID")
-    pm.add_argument("--write", action="store_true")
+    pm.add_argument("--write", action="store_true",
+                    help="Persist the result and issue a cert.claim (dry-run without).")
 
     # equiv
     pe = sub.add_parser("equiv", help="Test language equivalence.")
@@ -425,6 +446,7 @@ _DISPATCH = {
 
 
 def main(argv: list[str] | None = None) -> None:
+    _utf8_stdio()
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -442,3 +464,7 @@ def main(argv: list[str] | None = None) -> None:
         _die(f"database error: {exc}")
     except KeyboardInterrupt:
         sys.exit(130)
+
+
+if __name__ == "__main__":
+    main()

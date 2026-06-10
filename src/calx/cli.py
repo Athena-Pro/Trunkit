@@ -2,6 +2,7 @@
 
 Consumer commands (read-only, safe for LLM use):
     trunkit verify <claim_id>
+    trunkit verify --bundle FILE [--offline]
     trunkit standing [--method M] [--status S]
     trunkit export <id> [<id> ...]
 
@@ -12,6 +13,7 @@ Prover commands (require --write to record; dry-run otherwise):
     trunkit witness <claim_id> --kind KIND --body JSON [--write]
 
 calx data commands:
+    trunkit quickstart [--dir DIR] [--compose-only]
     trunkit init
     trunkit generate --limit N [--backend primesieve|pure]
     trunkit validate [--limit N]
@@ -24,16 +26,70 @@ calx data commands:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 
+import psycopg
+
 from . import db, generate, validate
+
+
+def _utf8_stdio() -> None:
+    """Emit UTF-8 regardless of console code page.
+
+    Windows cp1252 consoles otherwise raise UnicodeEncodeError on the
+    ✓ / ✗ / → marks used in command output and --help text.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            with contextlib.suppress(ValueError, OSError):
+                stream.reconfigure(encoding="utf-8", errors="replace")
 
 # ---------------------------------------------------------------------------
 # Consumer commands — read-only, no --write gate
 # ---------------------------------------------------------------------------
 
+def _cmd_verify_bundle(args: argparse.Namespace) -> int:
+    from . import bundle as bundle_mod
+
+    try:
+        bundle = bundle_mod.load_bundle(args.bundle)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    import pathlib
+
+    base_dir = pathlib.Path(args.bundle).resolve().parent
+    if args.offline:
+        results = bundle_mod.verify_bundle(bundle, None, base_dir)
+    else:
+        try:
+            with db.connect(args.dsn) as live:
+                results = bundle_mod.verify_bundle(bundle, live, base_dir)
+        except psycopg.OperationalError as exc:
+            print(f"  note: no database reachable ({exc}); structural checks only")
+            results = bundle_mod.verify_bundle(bundle, None, base_dir)
+
+    exported = bundle.get("exported_at", "?")
+    print(f"  bundle: {args.bundle}  ({len(results)} claim(s), exported {exported})")
+    for r in results:
+        print(f"  [{r.mark}] claim {r.claim_id}  {r.method:<18}  {r.status}")
+        print(f"      {r.statement[:70]}")
+        for note in r.notes:
+            print(f"      - {note}")
+    n_valid = sum(1 for r in results if r.ok is True)
+    print(f"  {n_valid}/{len(results)} valid")
+    return 0 if n_valid == len(results) else 1
+
+
 def _cmd_verify(args: argparse.Namespace) -> int:
+    if args.bundle:
+        return _cmd_verify_bundle(args)
+    if args.claim_id is None:
+        print("error: provide a claim_id or --bundle FILE", file=sys.stderr)
+        return 2
     with db.connect(args.dsn) as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT ok, evidence, witness FROM cert.verify(%s)",
@@ -62,10 +118,10 @@ def _cmd_standing(args: argparse.Namespace) -> int:
     if args.status:
         where.append("status = %s")
         params.append(args.status)
-    sql = "SELECT id, statement, method, status, checked_at FROM cert.standing"
+    sql = "SELECT claim_id, statement, method, status, checked_at FROM cert.standing"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY id"
+    sql += " ORDER BY claim_id"
     with db.connect(args.dsn) as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         rows = cur.fetchall()
@@ -121,7 +177,9 @@ def _cmd_check(args: argparse.Namespace) -> int:
             print(f"  claim {args.claim_id} not found")
             return 1
         method = row[0]
-        fn = "cert.check_with_witness" if method == "witness_carry" else "cert.check"
+        fn = ("cert.check_with_witness" if method == "witness_carry"
+              else "cert.check_kernel"   if method == "cert_kernel"
+              else "cert.check")
         cur.execute(f"SELECT {fn}(%s)", (args.claim_id,))
         cur.execute(
             "SELECT status, seq FROM cert.certificate "
@@ -184,10 +242,30 @@ def _cmd_witness(args: argparse.Namespace) -> int:
 # calx data commands (unchanged)
 # ---------------------------------------------------------------------------
 
+def _cmd_quickstart(args: argparse.Namespace) -> int:
+    from . import quickstart
+
+    return quickstart.run(args)
+
+
 def _cmd_init(args: argparse.Namespace) -> int:
     with db.connect(args.dsn) as conn:
-        db.apply_schema(conn)
+        db.apply_unified(conn)
     print("schema applied")
+    if args.local:
+        import pathlib
+        ext_dir = pathlib.Path(args.local)
+        if not ext_dir.is_dir():
+            print(f"  warning: --local path {ext_dir} does not exist, skipping")
+            return 0
+        with db.connect(args.dsn) as conn:
+            applied = db.apply_extensions(conn, ext_dir)
+        if applied:
+            print(f"  extensions applied ({len(applied)}):")
+            for f in applied:
+                print(f"    {f}")
+        else:
+            print("  (no numbered SQL files found in extension directory)")
     return 0
 
 
@@ -300,8 +378,16 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     # --- consumer ---
-    v = sub.add_parser("verify", help="side-effect-free re-verification of a claim")
-    v.add_argument("claim_id", type=int)
+    v = sub.add_parser(
+        "verify",
+        help="side-effect-free re-verification of a claim or an exported bundle",
+    )
+    v.add_argument("claim_id", type=int, nargs="?",
+                   help="claim id in the connected DB (omit when using --bundle)")
+    v.add_argument("--bundle", metavar="FILE",
+                   help="verify an exported proof bundle file instead of a DB claim")
+    v.add_argument("--offline", action="store_true",
+                   help="with --bundle: skip probe replay, structural checks only")
     v.set_defaults(func=_cmd_verify)
 
     st = sub.add_parser("standing", help="latest attestation status for all claims")
@@ -337,7 +423,27 @@ def build_parser() -> argparse.ArgumentParser:
     wi.set_defaults(func=_cmd_witness)
 
     # --- calx data ---
-    sub.add_parser("init", help="apply schema/views/procedures").set_defaults(func=_cmd_init)
+    qs = sub.add_parser(
+        "quickstart",
+        help="write docker-compose, start both databases, apply both schemas",
+    )
+    qs.add_argument(
+        "--dir", default=".", metavar="DIR",
+        help="where to write docker-compose.yml (default: current directory)",
+    )
+    qs.add_argument(
+        "--compose-only", action="store_true",
+        help="only write the compose file; do not start containers or apply schemas",
+    )
+    qs.set_defaults(func=_cmd_quickstart)
+
+    ini = sub.add_parser("init", help="apply core schema; optionally load local extensions")
+    ini.add_argument(
+        "--local", metavar="DIR", default=None,
+        help="also apply numbered SQL files from DIR after the core schema "
+             "(e.g. trunkit init --local local/sql)",
+    )
+    ini.set_defaults(func=_cmd_init)
 
     g = sub.add_parser("generate", help="populate integer tables up to --limit")
     g.add_argument("--limit", type=int, required=True)
@@ -392,8 +498,20 @@ def _load_tools_module(module_name: str, filename: str):
 
 
 def main(argv: list[str] | None = None) -> int:
+    _utf8_stdio()
     args = build_parser().parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except psycopg.OperationalError as exc:
+        print(f"error: database connection failed: {exc}", file=sys.stderr)
+        print(
+            "  point --dsn or $CALX_DSN at a running PostgreSQL instance, "
+            "then run `trunkit init`",
+            file=sys.stderr,
+        )
+        return 1
+    except KeyboardInterrupt:
+        return 130
 
 
 if __name__ == "__main__":

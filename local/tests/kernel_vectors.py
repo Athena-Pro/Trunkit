@@ -84,6 +84,32 @@ VECTORS: list[tuple[str, dict, bool | None]] = [
       "generators": {"a": [[1, 1], [0, 1]], "b": [[1, 0], [1, 1]]},
       "word": [], "target": [[1, 0], [0, 1]]}, None),
 
+    # ---- dfa_betti (DFA/graph Betti signature; LQLE topological bridge) ----
+    # two 3-cycles sharing nothing + a self-loop: V=4, edges 0-1-2-0 and 3->3
+    # → beta0=2 (two components), E=4, beta1 = 4-4+2 = 2
+    ("betti_two_components_with_loop",
+     {"schema": "dfa_betti", "V": 4, "edges": [[0, 1], [1, 2], [2, 0], [3, 3]],
+      "asserts": {"beta0": 2, "beta1": 2}}, True),
+    # single triangle: V=3, E=3, beta0=1, beta1 = 3-3+1 = 1
+    ("betti_triangle_one_cycle",
+     {"schema": "dfa_betti", "V": 3, "edges": [[0, 1], [1, 2], [2, 0]],
+      "asserts": {"beta0": 1, "beta1": 1, "chi": 0}}, True),
+    # tree (no cycles): V=3, E=2, beta1 = 2-3+1 = 0
+    ("betti_tree_acyclic",
+     {"schema": "dfa_betti", "V": 3, "edges": [[0, 1], [1, 2]],
+      "asserts": {"beta1": 0}}, True),
+    # self-loop alone: V=1, E=1, beta1 = 1-1+1 = 1
+    ("betti_self_loop",
+     {"schema": "dfa_betti", "V": 1, "edges": [[0, 0]],
+      "asserts": {"beta0": 1, "beta1": 1}}, True),
+    ("betti_wrong_beta1",
+     {"schema": "dfa_betti", "V": 3, "edges": [[0, 1], [1, 2], [2, 0]],
+      "asserts": {"beta1": 0}}, False),
+    ("betti_edge_out_of_range",
+     {"schema": "dfa_betti", "V": 2, "edges": [[0, 5]]}, None),
+    ("betti_bad_V",
+     {"schema": "dfa_betti", "V": 0, "edges": []}, None),
+
     # ---- dispatch ----
     ("unknown_schema_unverified", {"schema": "no_such_kernel"}, None),
 ]

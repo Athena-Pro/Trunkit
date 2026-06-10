@@ -1,0 +1,30 @@
+{
+  "repo": "C:/AI-Local/tel-clean",
+  "comment": "Authoritative map: each seeded curry.constants id -> the source symbol it models. File-pinned because several symbols (fold_self, normalize) recur across hir_*.rs. Consumed by tel_constants_check.py (drift-check) and tel_constants_seed.py (direct source->Postgres seeder).",
+  "constants": [
+    {"id": "BaseType_definition",          "kind": "type", "symbol": "BaseType",          "file": "src/hir.rs"},
+    {"id": "HodgeType_definition",          "kind": "type", "symbol": "HodgeType",         "file": "src/hir.rs"},
+    {"id": "HodgeAtom_definition",          "kind": "type", "symbol": "HodgeAtom",         "file": "src/hir.rs"},
+    {"id": "BondType_definition",           "kind": "type", "symbol": "BondType",          "file": "src/hir.rs"},
+    {"id": "Bond_definition",               "kind": "type", "symbol": "Bond",              "file": "src/hir.rs"},
+    {"id": "HIRExpr_definition",            "kind": "type", "symbol": "HIRExpr",           "file": "src/hir.rs"},
+    {"id": "Value_definition",              "kind": "type", "symbol": "Value",             "file": "src/hir.rs"},
+    {"id": "SetId_definition",              "kind": "type", "symbol": "SetId",             "file": "src/hir_rst.rs"},
+    {"id": "RSTSet_definition",             "kind": "type", "symbol": "RSTSet",            "file": "src/hir_rst.rs"},
+    {"id": "MembershipBond_definition",     "kind": "type", "symbol": "MembershipBond",    "file": "src/hir_rst.rs"},
+    {"id": "MembershipNetwork_definition",  "kind": "type", "symbol": "MembershipNetwork", "file": "src/hir_rst.rs"},
+    {"id": "FoldType_definition",           "kind": "type", "symbol": "FoldType",          "file": "src/hir_snf.rs"},
+    {"id": "SNFForm_definition",            "kind": "type", "symbol": "SNFForm",           "file": "src/hir_snf.rs"},
+    {"id": "SNFExpr_definition",            "kind": "type", "symbol": "SNFExpr",           "file": "src/hir_snf.rs"},
+
+    {"id": "fold_self_signature",                 "kind": "fn", "symbol": "fold_self",                 "file": "src/hir_folds.rs"},
+    {"id": "fold_chroma_signature",               "kind": "fn", "symbol": "fold_chroma",               "file": "src/hir_folds.rs"},
+    {"id": "fold_boundary_signature",             "kind": "fn", "symbol": "fold_boundary",             "file": "src/hir_folds.rs"},
+    {"id": "hir_to_rst_signature",                "kind": "fn", "symbol": "hir_to_rst",                "file": "src/hir_rst.rs"},
+    {"id": "fold_as_projection_signature",        "kind": "fn", "symbol": "fold_as_projection",        "file": "src/hir_rst.rs"},
+    {"id": "realize_as_set_construction_signature","kind": "fn","symbol": "realize_as_set_construction","file": "src/hir_rst.rs"},
+    {"id": "equivalent_via_network_signature",    "kind": "fn", "symbol": "equivalent_via_network",    "file": "src/hir_rst.rs"},
+    {"id": "snf_equivalent_via_snf_signature",    "kind": "fn", "symbol": "equivalent_via_snf",        "file": "src/hir_snf.rs"},
+    {"id": "snf_normalize_signature",             "kind": "fn", "symbol": "normalize",                 "file": "src/hir_snf.rs"}
+  ]
+}

@@ -14,6 +14,9 @@ import psycopg
 DEFAULT_DSN  = "postgresql://nerode:nerode@localhost:5435/nerode"
 TRUNKIT_DSN  = "postgresql://trunk:trunk@localhost:5434/trunk"
 
+# Without a timeout, an unreachable host hangs the CLI indefinitely.
+CONNECT_TIMEOUT = int(os.environ.get("TRUNKIT_CONNECT_TIMEOUT", "10"))
+
 # SQL files applied in strict order; each is idempotent.
 SCHEMA_FILES = (
     "00_bootstrap.sql",
@@ -51,7 +54,7 @@ def resolve_dsn() -> str:
 def connect(dsn: str | None = None) -> Generator[psycopg.Connection, None, None]:
     """Context manager: open, yield, and close a psycopg connection."""
     conn_str = dsn or resolve_dsn()
-    with psycopg.connect(conn_str) as conn:
+    with psycopg.connect(conn_str, connect_timeout=CONNECT_TIMEOUT) as conn:
         yield conn
 
 

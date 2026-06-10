@@ -119,8 +119,11 @@ def calx_dsn() -> str:
 @pytest.fixture(scope="session")
 def _initialized_calx_db(calx_dsn: str) -> str:
     from calx import db as calx_db
-    with calx_db.connect(calx_dsn) as c:
-        calx_db.apply_schema(c)
+    try:
+        with calx_db.connect(calx_dsn) as c:
+            calx_db.apply_schema(c)
+    except psycopg.Error as exc:
+        pytest.skip(f"calx DB not reachable: {exc}")
     return calx_dsn
 
 

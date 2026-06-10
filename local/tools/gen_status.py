@@ -33,3 +33,9 @@ L.append("*Backed by one Postgres database; the `.curry`/`.lace`/per-method dotf
 open("C:/AI-Local/Trunk/STATUS.md","w",encoding="utf-8").write("\n".join(L))
 print(f"wrote STATUS.md : {v} verified / {f} failed / {u} unknown / {t} total, {len(fails)} failures listed")
 c.close()
+
+# Also regenerate the HTML board graphic
+import importlib.util, os
+_spec = importlib.util.spec_from_file_location("gen_board", os.path.join(os.path.dirname(__file__), "gen_board.py"))
+_mod = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(_mod)
+_mod.main()

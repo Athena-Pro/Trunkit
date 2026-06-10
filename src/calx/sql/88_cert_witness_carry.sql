@@ -65,7 +65,7 @@ BEGIN
     INSERT INTO curry.inferences (
         inference_id, model_name, model_version,
         input_tokens, output_tokens, execution_timestamp,
-        temperature_used, max_tokens_used, metadata
+        temperature_used, metadata
     ) VALUES (
         v_inf_id, 'cert-checker-model', 1,
         convert_to(
@@ -73,7 +73,7 @@ BEGIN
             'UTF8'
         ),
         convert_to(COALESCE(v_ok::text, 'unverified'), 'UTF8'),
-        now(), 0.0, 0,
+        now(), 0.0,
         jsonb_build_object('method', v_claim.method, 'claim_kind', v_claim.claim_kind,
                            'tier', 'witness_carry')
     );
@@ -132,10 +132,10 @@ INSERT INTO cert.claim (
             ) AS witness
         FROM (
             SELECT
-                (SELECT count(*)::int FROM calx.factorizations
-                  WHERE n = 12 AND prime = 2) AS v2,
-                (SELECT count(*)::int FROM calx.factorizations
-                  WHERE n = 12 AND prime = 3) AS v3
+                COALESCE((SELECT exponent FROM calx.factorizations
+                  WHERE n = 12 AND prime = 2), 0) AS v2,
+                COALESCE((SELECT exponent FROM calx.factorizations
+                  WHERE n = 12 AND prime = 3), 0) AS v3
         ) sub
     $probe$
 ) ON CONFLICT (statement) DO NOTHING;

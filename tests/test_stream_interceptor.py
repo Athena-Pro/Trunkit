@@ -15,17 +15,20 @@ import importlib.util
 import io
 import json
 import pathlib
-import sys
 
 import pytest
 
 from tests.dbskip import connect_or_skip
 
-# Load the interceptor module via path (it lives in tools/, not src/)
-_TOOLS_DIR = pathlib.Path(__file__).parent.parent / "tools"
-_spec = importlib.util.spec_from_file_location(
-    "stream_interceptor", _TOOLS_DIR / "stream_interceptor.py"
+# Load the interceptor module via path (it lives in local/tools/, not src/)
+_INTERCEPTOR = (
+    pathlib.Path(__file__).parent.parent / "local" / "tools" / "stream_interceptor.py"
 )
+if not _INTERCEPTOR.is_file():
+    pytest.skip(
+        "local/tools/stream_interceptor.py not present", allow_module_level=True
+    )
+_spec = importlib.util.spec_from_file_location("stream_interceptor", _INTERCEPTOR)
 _stream_mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_stream_mod)
 
