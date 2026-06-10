@@ -56,6 +56,9 @@ SEARCH_PATH = "calx, curry, kan, public"
 
 DEFAULT_DSN = "postgresql://trunk:trunk@localhost:5434/trunk"
 
+# Without a timeout, an unreachable host hangs the CLI indefinitely.
+CONNECT_TIMEOUT = int(os.environ.get("TRUNKIT_CONNECT_TIMEOUT", "10"))
+
 
 def resolve_dsn(dsn: str | None = None) -> str:
     if dsn:
@@ -68,7 +71,9 @@ def resolve_dsn(dsn: str | None = None) -> str:
 
 @contextmanager
 def connect(dsn: str | None = None, *, autocommit: bool = False) -> Iterator[Connection]:
-    conn = psycopg.connect(resolve_dsn(dsn), autocommit=autocommit)
+    conn = psycopg.connect(
+        resolve_dsn(dsn), autocommit=autocommit, connect_timeout=CONNECT_TIMEOUT
+    )
     try:
         yield conn
         if not autocommit:

@@ -81,6 +81,21 @@ compromised or wiped Nerode cannot corrupt or rewrite proof history.
 
 ## Quick start
 
+From pip (requires Docker for the bundled databases):
+
+```bash
+pip install trunkit   # installs both the trunkit and nerode CLIs
+trunkit quickstart      # writes docker-compose.yml, starts both DBs, applies both schemas
+trunkit generate --limit 10000
+trunkit standing
+```
+
+`trunkit quickstart --compose-only` just writes the compose file if you'd
+rather start the databases yourself; already-running instances are picked up
+via `$CALX_DSN` / `$NERODE_DSN`.
+
+From a repo checkout:
+
 ```bash
 # 1. Start both PostgreSQL instances
 docker compose up -d db-trunkit db-nerode
@@ -94,11 +109,6 @@ trunkit close --write
 
 # 4. Porter: pre-pack a morning brief and open it as Model B
 python scripts/morning_brief_demo.py
-```
-
-```bash
-# Install
-pip install trunkit   # installs both the trunkit and nerode CLIs
 ```
 
 Environment variable: `CALX_DSN=postgresql://trunk:trunk@localhost:5434/trunk`
@@ -126,6 +136,13 @@ trunkit export <id> [<id> ...]
 # Emits a self-contained JSONB bundle to stdout:
 # claims + certificates + witnesses + derivations.
 # Portable — consumers can re-verify without a Trunkit install.
+
+trunkit verify --bundle FILE [--offline]
+# Consumer side of export: re-verifies a received bundle.
+# Replays each embedded probe against YOUR database (rolled back after),
+# checks witness presence, and verifies artifact sha256 hashes against
+# local files. --offline skips probe replay (structural checks only).
+# Three-valued per claim: VALID / REFUTED / UNVERIFIED. Exits 0 iff all valid.
 ```
 
 ```
