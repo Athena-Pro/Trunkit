@@ -26,6 +26,7 @@ __all__ = [
     "check_crt",
     "check_unit_fraction",
     "check_matrix_word",
+    "check_dfa_betti",
     "verify_witness",
     "verify_bundle",
 ]
@@ -147,6 +148,67 @@ def check_matrix_word(w: dict[str, Any]) -> tuple[bool | None, dict[str, Any]]:
         return None, {"error": f"{type(exc).__name__}: {exc}"}
 
 
+def check_dfa_betti(w: dict[str, Any]) -> tuple[bool | None, dict[str, Any]]:
+    """Verify a DFA/graph Betti certificate (the LQLE topological bridge).
+
+    A DFA transition graph is a 1-complex: states are vertices, transitions are
+    edges (self-loops and parallel edges count). Its homology is fully determined
+    by ``beta0`` (connected components, undirected), ``beta1 = E - V + beta0``
+    (circuit rank), and ``chi = V - E`` (with ``beta_n = 0`` for n >= 2).
+    *Building/minimizing* the automaton is the work; *checking* its Betti
+    signature is one union-find pass over the edge list.
+    """
+    try:
+        V = int(w["V"])
+        edges = w["edges"]
+        if V < 1:
+            return None, {"error": "V must be >= 1"}
+        if not isinstance(edges, list):
+            return None, {"error": "edges must be an array"}
+
+        parent = list(range(V))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        n_edges = 0
+        for e in edges:
+            u, x = int(e[0]), int(e[1])
+            if not (0 <= u < V and 0 <= x < V):
+                return None, {"error": f"edge endpoint out of range: [{u},{x}]"}
+            n_edges += 1
+            ru, rx = find(u), find(x)
+            if ru != rx:
+                parent[ru] = rx
+
+        beta0 = sum(1 for i in range(V) if find(i) == i)
+        beta1 = n_edges - V + beta0
+        chi = V - n_edges
+
+        asserts = w.get("asserts", {}) or {}
+        ok = True
+        if "beta0" in asserts:
+            ok = ok and beta0 == int(asserts["beta0"])
+        if "beta1" in asserts:
+            ok = ok and beta1 == int(asserts["beta1"])
+        if "chi" in asserts:
+            ok = ok and chi == int(asserts["chi"])
+
+        return ok, {
+            "kernel": "dfa_betti",
+            "V": V,
+            "E": n_edges,
+            "beta0": beta0,
+            "beta1": beta1,
+            "euler_char": chi,
+        }
+    except (KeyError, ValueError, TypeError, IndexError) as exc:
+        return None, {"error": f"{type(exc).__name__}: {exc}"}
+
+
 def check_unit_fraction(w: dict[str, Any]) -> tuple[bool | None, dict[str, Any]]:
     """Verify an Egyptian-fraction certificate (cf. arXiv:1606.02117).
 
@@ -186,11 +248,185 @@ def check_unit_fraction(w: dict[str, Any]) -> tuple[bool | None, dict[str, Any]]
         return None, {"error": f"{type(exc).__name__}: {exc}"}
 
 
+# --- Laurent polynomials over Z (dict exponent -> coeff), for the knot kernel ----
+
+def _lp_norm(p: dict[int, int]) -> dict[int, int]:
+    return {e: c for e, c in p.items() if c != 0}
+
+
+def _lp_add(a: dict[int, int], b: dict[int, int]) -> dict[int, int]:
+    out = dict(a)
+    for e, c in b.items():
+        out[e] = out.get(e, 0) + c
+    return _lp_norm(out)
+
+
+def _lp_mul(a: dict[int, int], b: dict[int, int]) -> dict[int, int]:
+    out: dict[int, int] = {}
+    for ea, ca in a.items():
+        for eb, cb in b.items():
+            out[ea + eb] = out.get(ea + eb, 0) + ca * cb
+    return _lp_norm(out)
+
+
+def _lp_sub(a: dict[int, int], b: dict[int, int]) -> dict[int, int]:
+    return _lp_add(a, {e: -c for e, c in b.items()})
+
+
+def _lp_canon(p: dict[int, int]) -> dict[int, int]:
+    """Canonical form up to units (+- t^k): shift min exponent to 0 and make the
+    lowest-degree coefficient positive. Two Laurent polynomials are equal up to a
+    unit iff their canonical forms are identical."""
+    p = _lp_norm(p)
+    if not p:
+        return {}
+    lo = min(p)
+    shifted = {e - lo: c for e, c in p.items()}
+    if shifted[0] < 0:
+        shifted = {e: -c for e, c in shifted.items()}
+    return shifted
+
+
+# Reduced Burau small blocks and their inverses (each block has monomial
+# determinant -t, so the inverse is exact Laurent). t -> {1:1}, 1 -> {0:1}.
+_T = {1: 1}
+_ONE = {0: 1}
+_NEG_T = {1: -1}
+_TINV = {-1: 1}
+_NEG_TINV = {-1: -1}
+
+
+def _burau_gen(n: int, g: int) -> list[list[dict[int, int]]]:
+    """Reduced Burau matrix (size n-1) of generator g: +i = sigma_i, -i = inverse.
+
+    Standard convention (e.g. Wikipedia 'Burau representation', reduced):
+      sigma_1        -> [[-t,0],[1,1]]      block at coords (1,2)
+      sigma_i (mid)  -> [[1,t,0],[0,-t,0],[0,1,1]]  block at (i-1,i,i+1)
+      sigma_{n-1}    -> [[1,t],[0,-t]]      block at (n-2,n-1)
+    For n=2 the representation is 1-dimensional: sigma_1 -> [-t].
+    """
+    m = n - 1
+    M = [[dict(_ONE) if r == c else {} for c in range(m)] for r in range(m)]
+    i, inv = abs(g), g < 0
+    if not (1 <= i <= n - 1):
+        raise ValueError(f"generator {g} out of range for B_{n}")
+
+    def place(block: list[list[dict[int, int]]], i0: int) -> None:
+        for r in range(len(block)):
+            for c in range(len(block)):
+                M[i0 + r][i0 + c] = dict(block[r][c])
+
+    if m == 1:                                  # B_2: 1x1, sigma_1 = [-t]
+        M[0][0] = dict(_NEG_TINV) if inv else dict(_NEG_T)  # (-t)^{-1} = -t^{-1}
+        return M
+    if i == 1:
+        blk = ([[_NEG_TINV, {}], [_TINV, _ONE]] if inv
+               else [[_NEG_T, {}], [_ONE, _ONE]])
+        place(blk, 0)
+    elif i == n - 1:
+        blk = ([[_ONE, _ONE], [{}, _NEG_TINV]] if inv
+               else [[_ONE, _T], [{}, _NEG_T]])
+        place(blk, n - 3)
+    else:
+        blk = ([[_ONE, _ONE, {}], [{}, _NEG_TINV, {}], [{}, _TINV, _ONE]] if inv
+               else [[_ONE, _T, {}], [{}, _NEG_T, {}], [{}, _ONE, _ONE]])
+        place(blk, i - 2)
+    return M
+
+
+def _lp_sum(parts) -> dict[int, int]:
+    out: dict[int, int] = {}
+    for p in parts:
+        out = _lp_add(out, p)
+    return out
+
+
+def _lp_matmul(A, B):
+    n = len(A)
+    return [[_lp_sum(_lp_mul(A[r][k], B[k][c]) for k in range(n)) for c in range(n)]
+            for r in range(n)]
+
+
+def _lp_det(M) -> dict[int, int]:
+    """Determinant of a Laurent-polynomial matrix via Laplace expansion."""
+    n = len(M)
+    if n == 1:
+        return dict(M[0][0])
+    if n == 2:
+        return _lp_sub(_lp_mul(M[0][0], M[1][1]), _lp_mul(M[0][1], M[1][0]))
+    total: dict[int, int] = {}
+    for c in range(n):
+        minor = [[M[r][cc] for cc in range(n) if cc != c] for r in range(1, n)]
+        term = _lp_mul(M[0][c], _lp_det(minor))
+        total = _lp_add(total, term) if c % 2 == 0 else _lp_sub(total, term)
+    return total
+
+
+def check_knot_alexander(w: dict[str, Any]) -> tuple[bool | None, dict[str, Any]]:
+    """Verify an Alexander-polynomial certificate for a braid closure.
+
+    A braid beta in B_n closes to a knot/link L. The reduced Burau representation
+    gives the unnormalised Alexander polynomial via the identity (up to a unit
+    +- t^k):  det(reducedBurau(beta) - I_{n-1})  =  Delta_L(t) * (1 + t + ... + t^{n-1}).
+    *Finding* a braid whose closure is a given knot is hard; *checking* an asserted
+    Alexander polynomial is a single matrix-chain product + determinant. The checker
+    recomputes the LHS and compares to the asserted Delta times the cyclotomic-like
+    factor, both canonicalised up to units. Optionally checks the knot determinant
+    |Delta(-1)|.
+    """
+    try:
+        n = int(w["n"])
+        braid = w["braid"]
+        if n < 2 or not isinstance(braid, list):
+            return None, {"error": "need n>=2 and a braid array"}
+
+        m = n - 1
+        prod = [[dict(_ONE) if r == c else {} for c in range(m)] for r in range(m)]
+        for g in braid:
+            prod = _lp_matmul(prod, _burau_gen(n, int(g)))
+
+        M_minus_I = [[_lp_sub(prod[r][c], _ONE if r == c else {})
+                      for c in range(m)] for r in range(m)]
+        lhs = _lp_det(M_minus_I)
+
+        cycl = {e: 1 for e in range(n)}                       # 1 + t + ... + t^{n-1}
+        alex = w.get("alexander")
+        if not isinstance(alex, dict):
+            return None, {"error": "no asserted alexander polynomial to check against",
+                          "recomputed_det": {str(k): v for k, v in sorted(lhs.items())}}
+        min_exp = int(alex.get("min_exp", 0))
+        coeffs = [int(c) for c in alex["coeffs"]]
+        delta = _lp_norm({min_exp + j: c for j, c in enumerate(coeffs)})
+        rhs = _lp_mul(delta, cycl)
+
+        ok = _lp_canon(lhs) == _lp_canon(rhs)
+
+        asserts = w.get("asserts", {}) or {}
+        det_at_minus1 = None
+        if "determinant" in asserts:
+            det_at_minus1 = abs(sum(c * ((-1) ** e) for e, c in delta.items()))
+            ok = ok and det_at_minus1 == int(asserts["determinant"])
+
+        return ok, {
+            "kernel": "knot_alexander",
+            "n": n,
+            "braid_length": len(braid),
+            "recomputed_det": {str(k): v for k, v in sorted(lhs.items())},
+            "rhs_delta_times_cyclotomic": {str(k): v for k, v in sorted(rhs.items())},
+            "matches_up_to_units": _lp_canon(lhs) == _lp_canon(rhs),
+            "knot_determinant_abs_delta_at_-1": det_at_minus1,
+        }
+    except (KeyError, ValueError, TypeError, IndexError) as exc:
+        return None, {"error": f"{type(exc).__name__}: {exc}"}
+
+
 _KERNELS = {
     "factorization": check_factorization,
     "crt": check_crt,
     "unit_fraction": check_unit_fraction,
     "matrix_word": check_matrix_word,
+    "dfa_betti": check_dfa_betti,
+    "knot_alexander": check_knot_alexander,
 }
 
 

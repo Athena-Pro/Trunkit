@@ -151,6 +151,130 @@ SELECT 'frontier_residual','{"lab":"hypergroup","hypergroup":"FlatType5"}'::json
     FROM strat.residual WHERE metric='haar_equation_residual'$p$
 WHERE NOT EXISTS (SELECT 1 FROM cert.claim WHERE statement LIKE 'strat: FlatType5 Haar-equation residual%');
 
+-- ---- instance 3: Whitney stratification of algebraic varieties (self-recomputing) ----
+--
+-- From paper-whitney-stratifications (WHITNEY_STRATIFICATION_MAPPING.md). The paper's
+-- headline (Part VII §7.1) is that Whitney conditions A/B come "for free from the
+-- certificate functor" -- "1000+ lines -> ~50 lines, verification = type check". That
+-- regularity claim is NOT checkable here: it needs limits of tangent planes / secant
+-- lines, which this layer does not compute. What IS exactly recomputable in-DB is the
+-- skeleton the paper builds on (Part IV §4.2): the Jacobian-rank stratification of an
+-- affine variety V(f) and its canonical filtration by iterated singular locus.
+--
+-- We attest that skeleton (proof-carrying, comp_sql) on the paper's two named examples
+-- (Part II §2.3): the cone and the Whitney umbrella -- and record the regularity claim
+-- honestly as UNVERIFIED (the third claims-outrun-implementation finding's successor:
+-- the README's "automatic Whitney A/B" outruns any in-DB checker).
+
+-- gradient of f = x^2 + y^2 - z^2 (the cone) at an integer point
+CREATE OR REPLACE FUNCTION strat.cone_grad(x int, y int, z int) RETURNS int[]
+  LANGUAGE sql IMMUTABLE AS $$ SELECT ARRAY[2*x, 2*y, -2*z] $$;
+CREATE OR REPLACE FUNCTION strat.on_cone(x int, y int, z int) RETURNS boolean
+  LANGUAGE sql IMMUTABLE AS $$ SELECT x*x + y*y - z*z = 0 $$;
+
+-- gradient of f = x^2 - y^2*z (the Whitney umbrella) at an integer point
+CREATE OR REPLACE FUNCTION strat.umbrella_grad(x int, y int, z int) RETURNS int[]
+  LANGUAGE sql IMMUTABLE AS $$ SELECT ARRAY[2*x, -2*y*z, -y*y] $$;
+CREATE OR REPLACE FUNCTION strat.on_umbrella(x int, y int, z int) RETURNS boolean
+  LANGUAGE sql IMMUTABLE AS $$ SELECT x*x - y*y*z = 0 $$;
+
+-- rank of a hypersurface Jacobian (a single gradient row): 0 if it vanishes, else 1.
+CREATE OR REPLACE FUNCTION strat.vrank(g int[]) RETURNS int
+  LANGUAGE sql IMMUTABLE AS $$ SELECT CASE WHEN g[1]=0 AND g[2]=0 AND g[3]=0 THEN 0 ELSE 1 END $$;
+
+INSERT INTO strat.site(name,kind,meta) VALUES
+ ('whitney_cone','algebraic_variety',
+  '{"lab":"whitney","f":"x^2+y^2-z^2","ambient_dim":2,"sing":"{apex}","example":"WHITNEY_STRATIFICATION_MAPPING.md Part II 2.3 (1)"}'),
+ ('whitney_umbrella','algebraic_variety',
+  '{"lab":"whitney","f":"x^2-y^2*z","ambient_dim":2,"sing":"z-axis","example":"WHITNEY_STRATIFICATION_MAPPING.md Part II 2.3 (2)"}')
+ON CONFLICT (name) DO NOTHING;
+
+-- tower = canonical filtration by iterated singular locus; orbit = dimension sequence,
+-- stab_depth = number of proper substrata steps (cone [2,0]->1, umbrella [2,1]->1).
+INSERT INTO strat.tower(site_id, endofunctor, max_depth, stab_depth, orbit, meta)
+SELECT s.id, 'Sing (iterated singular locus)', 2, 1, v.orbit::jsonb,
+       jsonb_build_object('filtration_dims', v.orbit,
+                          'note','depth = #strata - 1; sing-locus is smooth so the filtration stabilises after one step')
+FROM (VALUES ('whitney_cone','[2,0]'), ('whitney_umbrella','[2,1]')) v(nm,orbit)
+JOIN strat.site s ON s.name=v.nm
+WHERE NOT EXISTS (SELECT 1 FROM strat.tower t WHERE t.site_id=s.id);
+
+-- residual = proper-frontier defect: max(0, dim(Sing) - (dim(X)-1)). 0 = Sing has
+-- codim >=1 in X (the frontier condition holds, classified case).
+INSERT INTO strat.residual(site_id, object, metric, value, classified_zero, meta)
+SELECT s.id, 'singular_locus', 'frontier_codim_defect', 0.0, true,
+       jsonb_build_object('dim_X',2,'dim_Sing',v.dsing,
+                          'interpretation','0 = singular locus is a proper (lower-dim) substratum; frontier condition holds')
+FROM (VALUES ('whitney_cone',0), ('whitney_umbrella',1)) v(nm,dsing)
+JOIN strat.site s ON s.name=v.nm
+WHERE NOT EXISTS (SELECT 1 FROM strat.residual r WHERE r.site_id=s.id AND r.metric='frontier_codim_defect');
+
+-- valid (comp_sql, proof-carrying): re-derive the cone's Jacobian-rank stratification.
+-- gradient vanishes exactly at the apex (rank 0, singular) and is nonzero at sample
+-- smooth points on V (rank 1) => Sing = {apex}, dim 0, codim 2 in the dim-2 cone.
+INSERT INTO cert.claim(subject_kind,subject_ref,statement,claim_kind,method,probe_sql)
+SELECT 'algebraic_variety','{"lab":"whitney","variety":"cone","f":"x^2+y^2-z^2"}'::jsonb,
+ 'strat: cone x^2+y^2-z^2 Jacobian-rank stratification — gradient vanishes only at the apex (rank 0) and is full-rank on the smooth surface (rank 1), so Sing = {apex}, filtration dims [2,0]',
+ 'computational','comp_sql',
+ $p$SELECT (apex_on AND apex_rank=0 AND smooth_on AND smooth_full) AS ok,
+    jsonb_build_object('apex_on_variety',apex_on,'apex_rank',apex_rank,
+                       'smooth_pts_on_variety',smooth_on,'smooth_pts_full_rank',smooth_full,
+                       'filtration_dims', ARRAY[2,0]) AS evidence
+    FROM (
+      SELECT strat.on_cone(0,0,0) AS apex_on,
+             strat.vrank(strat.cone_grad(0,0,0)) AS apex_rank,
+             (SELECT bool_and(strat.on_cone(x,y,z))      FROM (VALUES (3,4,5),(5,12,13),(8,6,10)) v(x,y,z)) AS smooth_on,
+             (SELECT bool_and(strat.vrank(strat.cone_grad(x,y,z))=1) FROM (VALUES (3,4,5),(5,12,13),(8,6,10)) v(x,y,z)) AS smooth_full
+    ) t$p$
+WHERE NOT EXISTS (SELECT 1 FROM cert.claim WHERE statement LIKE 'strat: cone x^2+y^2-z^2 Jacobian-rank%');
+
+-- valid (comp_sql, proof-carrying): the Whitney umbrella. Gradient vanishes exactly on
+-- the z-axis (rank 0) and is full-rank on the smooth surface (rank 1) => Sing = z-axis,
+-- dim 1, codim 1; filtration dims [2,1] — a different orbit, so the tower discriminates.
+INSERT INTO cert.claim(subject_kind,subject_ref,statement,claim_kind,method,probe_sql)
+SELECT 'algebraic_variety','{"lab":"whitney","variety":"umbrella","f":"x^2-y^2*z"}'::jsonb,
+ 'strat: Whitney umbrella x^2-y^2*z Jacobian-rank stratification — gradient vanishes only on the z-axis (rank 0) and is full-rank on the smooth surface (rank 1), so Sing = z-axis, filtration dims [2,1]',
+ 'computational','comp_sql',
+ $p$SELECT (axis_on AND axis_rank0 AND smooth_on AND smooth_full) AS ok,
+    jsonb_build_object('zaxis_on_variety',axis_on,'zaxis_all_rank0',axis_rank0,
+                       'smooth_pts_on_variety',smooth_on,'smooth_pts_full_rank',smooth_full,
+                       'filtration_dims', ARRAY[2,1]) AS evidence
+    FROM (
+      SELECT (SELECT bool_and(strat.on_umbrella(0,0,t))            FROM (VALUES (-1),(0),(1),(5)) a(t)) AS axis_on,
+             (SELECT bool_and(strat.vrank(strat.umbrella_grad(0,0,t))=0) FROM (VALUES (-1),(0),(1),(5)) a(t)) AS axis_rank0,
+             (SELECT bool_and(strat.on_umbrella(x,y,z))            FROM (VALUES (2,1,4),(3,1,9),(2,2,1)) v(x,y,z)) AS smooth_on,
+             (SELECT bool_and(strat.vrank(strat.umbrella_grad(x,y,z))=1) FROM (VALUES (2,1,4),(3,1,9),(2,2,1)) v(x,y,z)) AS smooth_full
+    ) t$p$
+WHERE NOT EXISTS (SELECT 1 FROM cert.claim WHERE statement LIKE 'strat: Whitney umbrella x^2-y^2*z Jacobian-rank%');
+
+-- valid (comp_sql): Whitney regularity of the CONE at the apex, proved via homogeneity.
+-- The cone is homogeneous of degree 2, so Euler's identity gives x . grad f = 2 f, which
+-- is 0 on the variety. The tangent plane at a smooth point x is grad f^perp, so the radial
+-- direction x (= the secant from the apex to x) lies in the tangent plane. Hence every
+-- apex-secant is tangent => Whitney condition B holds at the apex; Whitney A is automatic
+-- because the lower stratum is the 0-dim apex (tangent space {0} is contained in anything).
+-- The probe confirms the Euler identity x.grad f = 2f = 0 at sample cone points.
+--
+-- NOTE: the Whitney UMBRELLA x^2 - y^2 z is NOT homogeneous (degrees 2 and 3 mix), so this
+-- argument does not apply. Its Whitney regularity at the origin is the subtle textbook case
+-- and is deliberately NOT asserted here (deferred to a careful tangent/secant-limit checker),
+-- rather than claimed unverified. This is the honest replacement for the paper's blanket
+-- "Whitney A/B automatic" claim (WHITNEY_STRATIFICATION_MAPPING.md Part VII 7.1).
+INSERT INTO cert.claim(subject_kind,subject_ref,statement,claim_kind,method,probe_sql)
+SELECT 'whitney_regularity',
+ '{"lab":"whitney","variety":"cone","method":"Euler homogeneity (deg 2): x.grad f = 2f = 0 on V => radial secant in tangent plane",
+   "scope":"cone apex only; umbrella deferred (non-homogeneous)"}'::jsonb,
+ 'strat: the cone x^2+y^2-z^2 is Whitney-regular at the apex — Whitney A is automatic (0-dim lower stratum) and Whitney B holds by homogeneity (every apex-secant x satisfies x.grad f = 2f = 0, so it lies in the tangent plane)',
+ 'computational','comp_sql',
+ $p$WITH pts(x,y,z) AS (VALUES (3,4,5),(5,12,13),(8,6,10),(1,0,1))
+   SELECT (bool_and(radial_dot_grad = 0 AND on_variety) AND count(*) = 4) AS ok,
+     jsonb_build_object('checked', count(*),
+       'all_radial_in_tangent', bool_and(radial_dot_grad = 0),
+       'argument','homogeneous deg 2 => x.grad f = 2f = 0 on V => radial (apex-secant) lies in tangent plane => Whitney B at apex') AS evidence
+   FROM (SELECT (2*x*x + 2*y*y - 2*z*z) AS radial_dot_grad, (x*x + y*y - z*z = 0) AS on_variety
+           FROM pts) t$p$
+WHERE NOT EXISTS (SELECT 1 FROM cert.claim WHERE statement LIKE 'strat: the cone x^2+y^2-z^2 is Whitney-regular at the apex%');
+
 -- attest everything strat just produced
 DO $$ DECLARE c RECORD; BEGIN
   FOR c IN SELECT id FROM cert.claim
