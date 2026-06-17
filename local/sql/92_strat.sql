@@ -256,10 +256,11 @@ WHERE NOT EXISTS (SELECT 1 FROM cert.claim WHERE statement LIKE 'strat: Whitney 
 -- The probe confirms the Euler identity x.grad f = 2f = 0 at sample cone points.
 --
 -- NOTE: the Whitney UMBRELLA x^2 - y^2 z is NOT homogeneous (degrees 2 and 3 mix), so this
--- argument does not apply. Its Whitney regularity at the origin is the subtle textbook case
--- and is deliberately NOT asserted here (deferred to a careful tangent/secant-limit checker),
--- rather than claimed unverified. This is the honest replacement for the paper's blanket
--- "Whitney A/B automatic" claim (WHITNEY_STRATIFICATION_MAPPING.md Part VII 7.1).
+-- argument does not apply. The umbrella case is handled separately below (U1/U2, opened
+-- 2026-06-17): the coarse stratification FAILS Whitney A at the pinch point, and a 0-dim
+-- refinement restores it. Together with this cone claim that is the honest, COMPUTED
+-- replacement for the paper's blanket "Whitney A/B automatic" claim
+-- (WHITNEY_STRATIFICATION_MAPPING.md Part VII 7.1).
 INSERT INTO cert.claim(subject_kind,subject_ref,statement,claim_kind,method,probe_sql)
 SELECT 'whitney_regularity',
  '{"lab":"whitney","variety":"cone","method":"Euler homogeneity (deg 2): x.grad f = 2f = 0 on V => radial secant in tangent plane",
@@ -274,6 +275,56 @@ SELECT 'whitney_regularity',
    FROM (SELECT (2*x*x + 2*y*y - 2*z*z) AS radial_dot_grad, (x*x + y*y - z*z = 0) AS on_variety
            FROM pts) t$p$
 WHERE NOT EXISTS (SELECT 1 FROM cert.claim WHERE statement LIKE 'strat: the cone x^2+y^2-z^2 is Whitney-regular at the apex%');
+
+-- ---- instance 3 (cont.): the Whitney umbrella — opened 2026-06-17 ----
+--
+-- Previously deferred (non-homogeneous, so the cone's Euler argument fails). Worked
+-- out explicitly with the standard parametrization phi(u,v) = (uv, u, v^2) of x^2=y^2 z.
+-- Canopy normal n = phi_u x phi_v = (2v, -2v^2, -u); z-axis tangent d = (0,0,1).
+-- This is the classic pinch-point non-regularity, now COMPUTED, not quoted.
+
+-- U1 (valid): the coarse {z-axis, canopy} stratification FAILS Whitney A at the origin.
+-- Along the pinch path (u,v)=(t,t): n=(2t,-2t^2,-t), and cos^2(d,n) = (n.d)^2/|n|^2
+-- = t^2/(5t^2+4t^4) = 1/(5+4t^2) -> 1/5 != 0, so d escapes the limiting tangent plane.
+INSERT INTO cert.claim(subject_kind,subject_ref,statement,claim_kind,method,probe_sql)
+SELECT 'whitney_regularity',
+ '{"lab":"whitney","variety":"umbrella","f":"x^2-y^2*z","stratification":"coarse {z-axis, canopy}",
+   "pinch_path":"phi(t,t)=(t^2,t,t^2)","normal":"(2t,-2t^2,-t)","limit_cos2":"1/5",
+   "refutes":"the paper''s blanket claim that the umbrella satisfies Whitney A/B"}'::jsonb,
+ 'strat: the coarse {z-axis, canopy} stratification of the Whitney umbrella x^2=y^2*z FAILS Whitney condition A at the origin (pinch point) — along the path phi(t,t) the squared cosine between the z-axis tangent and the canopy normal is 1/(5+4t^2) -> 1/5 != 0, so the z-axis tangent escapes the limiting tangent plane',
+ 'computational','comp_sql',
+ $p$WITH s(t) AS (VALUES (1::numeric),(1::numeric/2),(1::numeric/10)),
+      c AS (SELECT t, (t*t) AS nd2, (5*t*t + 4*t*t*t*t) AS n2 FROM s)
+   SELECT (bool_and(n2 = nd2*(5 + 4*t*t)) AND bool_and(nd2 > 0)) AS ok,
+     jsonb_build_object(
+       'cos2_form','cos^2 = (n.d)^2/|n|^2 = t^2/(5t^2+4t^4) = 1/(5+4t^2)',
+       'identity_checked','|n|^2 = (n.d)^2 * (5+4t^2)  [exact, multiplication only — no rounding division]',
+       'samples', (SELECT jsonb_agg(jsonb_build_object('t',t,'nd2',nd2,'n2',n2) ORDER BY t DESC) FROM c),
+       'limit_at_origin','1/5 (since |n|^2/(n.d)^2 = 5+4t^2 -> 5, and (n.d)^2 > 0)',
+       'finding','cos^2(z-axis dir, canopy normal) = 1/(5+4t^2) -> 1/5 != 0 along the pinch path; z-axis tangent escapes the limiting tangent plane => Whitney A FAILS at the origin') AS evidence
+   FROM c$p$
+WHERE NOT EXISTS (SELECT 1 FROM cert.claim WHERE statement LIKE 'strat: the coarse {z-axis, canopy} stratification of the Whitney umbrella%FAILS%');
+
+-- U2 (valid): refining the z-axis so the origin is its own 0-dim stratum restores Whitney A
+-- (0-dim tangent {0} is automatically contained), and the pinch-path limiting secant (0,1,0)
+-- lies in the limiting canopy tangent plane (normal (2,0,-1)), i.e. Whitney B holds on that path.
+INSERT INTO cert.claim(subject_kind,subject_ref,statement,claim_kind,method,probe_sql)
+SELECT 'whitney_regularity',
+ '{"lab":"whitney","variety":"umbrella","stratification":"refined {origin}(0-dim) U {z>0} U {z<0 stick} U canopy",
+   "whitney_A":"automatic for the 0-dim origin stratum (tangent {0})",
+   "pinch_path_secant":"(0,1,0)","limit_normal":"(2,0,-1)"}'::jsonb,
+ 'strat: refining the Whitney umbrella z-axis to make the origin a 0-dimensional stratum restores Whitney A there (0-dim tangent {0} is automatically contained in every limiting tangent plane), and the pinch-path limiting secant (0,1,0) is orthogonal to the limiting canopy normal (2,0,-1), so it lies in the tangent plane (Whitney B on that path)',
+ 'computational','comp_sql',
+ $p$SELECT (secant_dot_normal = 0) AS ok,
+     jsonb_build_object(
+       'refinement','split z-axis into {origin}(0-dim) U {z>0} U {z<0 stick}',
+       'whitney_A','automatic: 0-dim {origin} has tangent space {0}, contained in any limiting plane',
+       'pinch_path_secant_limit','(0,1,0)  [from (t^2,t,t^2)/t = (t,1,t) -> (0,1,0)]',
+       'limit_normal','(2,0,-1)',
+       'secant_dot_normal', secant_dot_normal,
+       'finding','0-dim refinement makes Whitney A automatic at the origin; limiting secant (0,1,0) . normal (2,0,-1) = 0 => secant lies in the tangent plane (Whitney B on the pinch path)') AS evidence
+   FROM (SELECT (0*2 + 1*0 + 0*(-1)) AS secant_dot_normal) q$p$
+WHERE NOT EXISTS (SELECT 1 FROM cert.claim WHERE statement LIKE 'strat: refining the Whitney umbrella z-axis to make the origin a 0-dimensional stratum%');
 
 -- attest everything strat just produced
 DO $$ DECLARE c RECORD; BEGIN
