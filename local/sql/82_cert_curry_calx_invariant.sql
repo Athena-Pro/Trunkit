@@ -28,3 +28,11 @@ DO $$ DECLARE c RECORD; BEGIN
   FOR c IN SELECT id FROM cert.claim WHERE statement LIKE 'cert: the curry_to_calx functor is a clean calx-prefix renaming%'
   LOOP PERFORM cert.check(c.id); END LOOP;
 END $$;
+
+-- Close out the stale snapshot it supersedes: mark claim #274 refuted (its probe
+-- recomputes the live map count = 20 != asserted 19). Recorded honestly rather than
+-- left grey; the corrected invariant above is the replacement.
+DO $$ DECLARE c RECORD; BEGIN
+  FOR c IN SELECT id FROM cert.claim WHERE statement = 'kan functor curry_to_calx maps exactly 19 objects'
+  LOOP PERFORM cert.check(c.id); END LOOP;
+END $$;

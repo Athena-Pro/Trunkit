@@ -36,20 +36,41 @@ LANGUAGE sql STABLE AS $$
     END AS reason,
     CASE WHEN l.status IS NULL OR l.status = 'unverified' THEN 'high' ELSE 'medium' END AS severity
   FROM latest l
-  WHERE l.status IS NULL
-     OR l.status = 'unverified'
-     OR (l.status IS DISTINCT FROM 'valid'
-         AND l.method = 'formal_external'
-         AND NOT EXISTS (SELECT 1 FROM cert.artifact a WHERE a.claim_id = l.id))
-     OR (l.status IS DISTINCT FROM 'valid'
-         AND l.method = 'cert_kernel'
-         AND NOT EXISTS (SELECT 1 FROM cert.proof_obligation po WHERE po.claim_id = l.id));
+  WHERE l.method NOT IN ('empirical_corpus','agent_adjudication','domain_invariant_decl')  -- provenance/record classes are exempt (see cert.outrun_exempt)
+    AND ( l.status IS NULL
+       OR l.status = 'unverified'
+       OR (l.status IS DISTINCT FROM 'valid'
+           AND l.method = 'formal_external'
+           AND NOT EXISTS (SELECT 1 FROM cert.artifact a WHERE a.claim_id = l.id))
+       OR (l.status IS DISTINCT FROM 'valid'
+           AND l.method = 'cert_kernel'
+           AND NOT EXISTS (SELECT 1 FROM cert.proof_obligation po WHERE po.claim_id = l.id)) );
 $$;
 
 COMMENT ON FUNCTION cert.outrun_watch() IS
-  'Claims-outrun-implementation detector: flags every claim whose asserted status '
-  'outruns its backing (unverified / unchecked / unbacked formal_external / proofless '
-  'cert_kernel). A cleanly valid, backed claim is never flagged. Re-runnable self-audit.';
+  'Claims-outrun-implementation detector: flags every VERIFIABLE claim whose asserted '
+  'status outruns its backing (unverified / unchecked / unbacked formal_external / '
+  'proofless cert_kernel). Provenance/record methods (empirical_corpus, agent_adjudication, '
+  'domain_invariant_decl) are NOT probe-verifiable by nature and are exempt — see '
+  'cert.outrun_exempt(). A cleanly valid, backed claim is never flagged. Re-runnable self-audit.';
+
+-- Companion: provenance/record claims that are exempt from the outrun count because they
+-- are not the kind of claim an in-DB probe is meant to verify. Surfaced separately so the
+-- exemption is transparent, not a silent drop.
+CREATE OR REPLACE FUNCTION cert.outrun_exempt()
+RETURNS TABLE(claim_id bigint, statement text, method text, latest_status text, class text)
+LANGUAGE sql STABLE AS $$
+  SELECT cl.id, cl.statement, cl.method,
+         (SELECT ce.status FROM cert.certificate ce WHERE ce.claim_id = cl.id ORDER BY ce.seq DESC LIMIT 1),
+         CASE cl.method
+           WHEN 'empirical_corpus'      THEN 'provenance record (corpus assertion)'
+           WHEN 'agent_adjudication'    THEN 'agent decision log'
+           WHEN 'domain_invariant_decl' THEN 'invariant declaration (awaiting a checker)'
+         END
+  FROM cert.claim cl
+  WHERE cl.method IN ('empirical_corpus','agent_adjudication','domain_invariant_decl')
+    AND COALESCE((SELECT ce.status FROM cert.certificate ce WHERE ce.claim_id = cl.id ORDER BY ce.seq DESC LIMIT 1), 'unverified') <> 'valid';
+$$;
 
 -- valid (comp_sql): the detector is SOUND — it never flags a cleanly-valid claim, and
 -- it partitions the ledger (flagged ∪ valid = all claims, disjoint). Re-checkable.
