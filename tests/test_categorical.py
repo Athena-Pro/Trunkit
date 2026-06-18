@@ -143,7 +143,8 @@ class TestCheckTriangleCommutes:
     """nerode.check_triangle_commutes(f, g, h)."""
 
     @pytest.fixture(scope="class")
-    def triangle_ids(self, nerode_dsn, ids):
+    @classmethod
+    def triangle_ids(cls, nerode_dsn, ids):
         """Ensure P49→P46 morphism exists, collect IDs for triangle checks."""
         with _fresh(nerode_dsn) as c:
             # π₁: P46→c4  π₂: P46→c6
@@ -285,7 +286,8 @@ class TestCalxFunctorReport:
     """nerode.calx_functor_report()."""
 
     @pytest.fixture(scope="class")
-    def report(self, nerode_dsn):
+    @classmethod
+    def report(cls, nerode_dsn):
         with _fresh(nerode_dsn) as c:
             return c.execute("SELECT * FROM nerode.calx_functor_report()").fetchall()
 
