@@ -693,3 +693,337 @@ SELECT cert.submit_proof(c.id,
     '94_cert_kernel.sql corpus seed (2604.15386)')
 FROM cert.claim c
 WHERE c.statement = 'the SL(2,Z) word a*b*a equals [[2,3],[1,2]] (matrix-semigroup membership, cf. arXiv:2604.15386)';
+
+-- ---- LQLE Hecke-move topological invariance (reuses the dfa_betti kernel above) ----
+--
+-- LQLE (research-kernel/hecke.py) defines a HeckeMove as a degree-preserving
+-- two-edge swap on 4 distinct vertices (remove {(a,b),(c,d)}; add {(a,c),(b,d)}
+-- or {(a,d),(b,c)}), admitted only if the result is simple and CONNECTED. Such a
+-- swap keeps V and E fixed and preserves connectivity, so beta0 stays 1 and
+-- beta1 = E - V + beta0 is invariant. hecke.py asserts exactly this ("the
+-- certified sector is captured by (beta0,beta1) constraints").
+--
+-- We attest the invariance THROUGH the dfa_betti kernel defined above (the
+-- LQLE->Trunkit kernel that is already imported): compute the signature before
+-- and after a concrete admissible move and require equality. Proof-carrying:
+-- both graphs travel in the probe; the verdict re-runs the kernel. Idempotent.
+--
+-- Concrete move: g0 = 4-cycle 0-1-2-3-0 (V=4,E=4,beta0=1,beta1=1). Swap removes
+-- {(0,1),(2,3)} and adds {(0,2),(1,3)} (the diagonals); result 0-2-1-3-0 is again
+-- a single 4-cycle, same signature. (The other rewiring {(0,3),(1,2)} is rejected
+-- by hecke.py because both edges already exist in g0 — noted here for fidelity.)
+INSERT INTO cert.claim (subject_kind, subject_ref, statement, claim_kind, method, probe_sql)
+SELECT 'hecke_move',
+ '{"lab":"LQLE","source":"research-kernel/hecke.py HeckeMove (degree-preserving 2-edge swap)",
+   "g0":"4-cycle 0-1-2-3-0","move":{"removed":[[0,1],[2,3]],"added":[[0,2],[1,3]]},
+   "kernel":"cert.kernel_dfa_betti (imported from LQLE QuineGraph TopologicalSignature)"}'::jsonb,
+ 'hecke-move: an LQLE Hecke move (degree-preserving 2-edge swap, connectivity-preserving) leaves the dfa_betti signature (beta0,beta1,euler_char) invariant — verified through the imported kernel on a concrete 4-cycle swap',
+ 'computational','comp_sql',
+ $p$WITH bef AS (SELECT evidence AS e FROM cert.kernel_dfa_betti(
+                '{"schema":"dfa_betti","V":4,"edges":[[0,1],[1,2],[2,3],[3,0]]}'::jsonb)),
+      aft AS (SELECT evidence AS e FROM cert.kernel_dfa_betti(
+                '{"schema":"dfa_betti","V":4,"edges":[[0,2],[0,3],[1,2],[1,3]]}'::jsonb))
+   SELECT ( (bef.e->>'beta0') = (aft.e->>'beta0')
+        AND (bef.e->>'beta1') = (aft.e->>'beta1')
+        AND (bef.e->>'euler_char') = (aft.e->>'euler_char') ) AS ok,
+     jsonb_build_object('before',bef.e,'after',aft.e,
+       'move','remove {(0,1),(2,3)}, add {(0,2),(1,3)} — degree-preserving 2-edge swap',
+       'invariant_preserved', jsonb_build_object('beta0',bef.e->'beta0','beta1',bef.e->'beta1','euler_char',bef.e->'euler_char')) AS evidence
+   FROM bef, aft$p$
+WHERE NOT EXISTS (SELECT 1 FROM cert.claim WHERE statement LIKE 'hecke-move: an LQLE Hecke move%');
+
+DO $$ DECLARE c RECORD; BEGIN
+  FOR c IN SELECT id FROM cert.claim WHERE statement LIKE 'hecke-move:%'
+  LOOP PERFORM cert.check(c.id); END LOOP;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 3. knot_alexander kernel — Alexander polynomial of a braid closure via the
+--    reduced Burau representation. Genuine knot/link invariant, exact integer
+--    Laurent-polynomial arithmetic. Mirrors src/calx/kernel.py:check_knot_alexander
+--    (validated there against unknot/trefoil/figure-8). Identity used (up to a
+--    unit +- t^k):  det(reducedBurau(beta) - I) = Delta_L(t) * (1+t+...+t^{n-1}).
+--    *Finding* a braid for a knot is hard; *checking* an asserted Alexander
+--    polynomial is one matrix-chain product + determinant.
+-- ---------------------------------------------------------------------------
+
+-- Laurent polynomials as jsonb {exponent_text: coeff}; zero coeffs dropped.
+CREATE OR REPLACE FUNCTION cert.lp_add(a jsonb, b jsonb) RETURNS jsonb LANGUAGE plpgsql IMMUTABLE AS $f$
+DECLARE r jsonb := COALESCE(a,'{}'::jsonb); k text; v bigint; nv bigint;
+BEGIN
+  FOR k, v IN SELECT key, value::bigint FROM jsonb_each_text(COALESCE(b,'{}'::jsonb)) LOOP
+    nv := COALESCE((r->>k)::bigint,0) + v;
+    IF nv = 0 THEN r := r - k; ELSE r := jsonb_set(r, ARRAY[k], to_jsonb(nv)); END IF;
+  END LOOP;
+  RETURN r;
+END $f$;
+
+CREATE OR REPLACE FUNCTION cert.lp_mul(a jsonb, b jsonb) RETURNS jsonb LANGUAGE plpgsql IMMUTABLE AS $f$
+DECLARE r jsonb := '{}'::jsonb; ka text; va bigint; kb text; vb bigint; e text; cur bigint;
+BEGIN
+  FOR ka, va IN SELECT key, value::bigint FROM jsonb_each_text(COALESCE(a,'{}'::jsonb)) LOOP
+    FOR kb, vb IN SELECT key, value::bigint FROM jsonb_each_text(COALESCE(b,'{}'::jsonb)) LOOP
+      e := (ka::int + kb::int)::text;
+      cur := COALESCE((r->>e)::bigint,0) + va*vb;
+      IF cur = 0 THEN r := r - e; ELSE r := jsonb_set(r, ARRAY[e], to_jsonb(cur)); END IF;
+    END LOOP;
+  END LOOP;
+  RETURN r;
+END $f$;
+
+-- canonical form up to a unit (+- t^k): shift min exponent to 0, sign-fix lowest coeff.
+CREATE OR REPLACE FUNCTION cert.lp_canon(p jsonb) RETURNS jsonb LANGUAGE plpgsql IMMUTABLE AS $f$
+DECLARE lo int; r jsonb := '{}'::jsonb; k text; v bigint;
+BEGIN
+  IF p IS NULL OR p = '{}'::jsonb THEN RETURN '{}'::jsonb; END IF;
+  SELECT min(key::int) INTO lo FROM jsonb_each_text(p);
+  FOR k, v IN SELECT key, value::bigint FROM jsonb_each_text(p) LOOP
+    r := jsonb_set(r, ARRAY[(k::int - lo)::text], to_jsonb(v));
+  END LOOP;
+  IF (r->>'0')::bigint < 0 THEN
+    SELECT jsonb_object_agg(key, (-(value::bigint))) INTO r FROM jsonb_each_text(r);
+  END IF;
+  RETURN r;
+END $f$;
+
+-- reduced Burau matrix (size n-1) of generator g (+i = sigma_i, -i = inverse).
+CREATE OR REPLACE FUNCTION cert.lp_burau_gen(n int, g int) RETURNS jsonb LANGUAGE plpgsql IMMUTABLE AS $f$
+DECLARE m int := n-1; mat jsonb := '[]'::jsonb; r int; c int; i int := abs(g); inv boolean := g<0; i0 int; row jsonb;
+        T jsonb:='{"1":1}'; ONE jsonb:='{"0":1}'; NEGT jsonb:='{"1":-1}';
+        TINV jsonb:='{"-1":1}'; NEGTINV jsonb:='{"-1":-1}'; EMPTY jsonb:='{}';
+BEGIN
+  IF i<1 OR i>n-1 THEN RAISE EXCEPTION 'generator % out of range for B_%', g, n; END IF;
+  FOR r IN 0..m-1 LOOP
+    row := '[]'::jsonb;
+    FOR c IN 0..m-1 LOOP row := row || jsonb_build_array(CASE WHEN r=c THEN ONE ELSE EMPTY END); END LOOP;
+    mat := mat || jsonb_build_array(row);
+  END LOOP;
+  IF m = 1 THEN
+    mat := jsonb_set(mat, ARRAY['0','0'], CASE WHEN inv THEN NEGTINV ELSE NEGT END);
+    RETURN mat;
+  END IF;
+  IF i = 1 THEN
+    IF inv THEN
+      mat:=jsonb_set(mat,ARRAY['0','0'],NEGTINV); mat:=jsonb_set(mat,ARRAY['1','0'],TINV); mat:=jsonb_set(mat,ARRAY['1','1'],ONE);
+    ELSE
+      mat:=jsonb_set(mat,ARRAY['0','0'],NEGT);    mat:=jsonb_set(mat,ARRAY['1','0'],ONE);  mat:=jsonb_set(mat,ARRAY['1','1'],ONE);
+    END IF;
+  ELSIF i = n-1 THEN
+    i0:=n-3;
+    IF inv THEN
+      mat:=jsonb_set(mat,ARRAY[i0::text,i0::text],ONE); mat:=jsonb_set(mat,ARRAY[i0::text,(i0+1)::text],ONE); mat:=jsonb_set(mat,ARRAY[(i0+1)::text,(i0+1)::text],NEGTINV);
+    ELSE
+      mat:=jsonb_set(mat,ARRAY[i0::text,i0::text],ONE); mat:=jsonb_set(mat,ARRAY[i0::text,(i0+1)::text],T);   mat:=jsonb_set(mat,ARRAY[(i0+1)::text,(i0+1)::text],NEGT);
+    END IF;
+  ELSE
+    i0:=i-2;
+    IF inv THEN -- [[1,1,0],[0,-t^-1,0],[0,t^-1,1]]
+      mat:=jsonb_set(mat,ARRAY[i0::text,(i0+1)::text],ONE);
+      mat:=jsonb_set(mat,ARRAY[(i0+1)::text,(i0+1)::text],NEGTINV);
+      mat:=jsonb_set(mat,ARRAY[(i0+2)::text,(i0+1)::text],TINV);
+    ELSE -- [[1,t,0],[0,-t,0],[0,1,1]]
+      mat:=jsonb_set(mat,ARRAY[i0::text,(i0+1)::text],T);
+      mat:=jsonb_set(mat,ARRAY[(i0+1)::text,(i0+1)::text],NEGT);
+      mat:=jsonb_set(mat,ARRAY[(i0+2)::text,(i0+1)::text],ONE);
+    END IF;
+  END IF;
+  RETURN mat;
+END $f$;
+
+CREATE OR REPLACE FUNCTION cert.lp_matmul(A jsonb, B jsonb) RETURNS jsonb LANGUAGE plpgsql IMMUTABLE AS $f$
+DECLARE n int := jsonb_array_length(A); r int; c int; k int; acc jsonb; row jsonb; M jsonb := '[]'::jsonb;
+BEGIN
+  FOR r IN 0..n-1 LOOP
+    row := '[]'::jsonb;
+    FOR c IN 0..n-1 LOOP
+      acc := '{}'::jsonb;
+      FOR k IN 0..n-1 LOOP acc := cert.lp_add(acc, cert.lp_mul((A->r)->k, (B->k)->c)); END LOOP;
+      row := row || jsonb_build_array(acc);
+    END LOOP;
+    M := M || jsonb_build_array(row);
+  END LOOP;
+  RETURN M;
+END $f$;
+
+CREATE OR REPLACE FUNCTION cert.lp_det(M jsonb) RETURNS jsonb LANGUAGE plpgsql IMMUTABLE AS $f$
+DECLARE n int := jsonb_array_length(M); c int; rr int; cc int; minor jsonb; row jsonb;
+        total jsonb := '{}'::jsonb; term jsonb; NEG1 jsonb := '{"0":-1}';
+BEGIN
+  IF n = 1 THEN RETURN (M->0)->0; END IF;
+  IF n = 2 THEN
+    RETURN cert.lp_add(cert.lp_mul((M->0)->0,(M->1)->1),
+                       cert.lp_mul(NEG1, cert.lp_mul((M->0)->1,(M->1)->0)));
+  END IF;
+  FOR c IN 0..n-1 LOOP
+    minor := '[]'::jsonb;
+    FOR rr IN 1..n-1 LOOP
+      row := '[]'::jsonb;
+      FOR cc IN 0..n-1 LOOP IF cc<>c THEN row := row || jsonb_build_array((M->rr)->cc); END IF; END LOOP;
+      minor := minor || jsonb_build_array(row);
+    END LOOP;
+    term := cert.lp_mul((M->0)->c, cert.lp_det(minor));
+    IF c % 2 = 0 THEN total := cert.lp_add(total, term);
+    ELSE total := cert.lp_add(total, cert.lp_mul(NEG1, term)); END IF;
+  END LOOP;
+  RETURN total;
+END $f$;
+
+CREATE OR REPLACE FUNCTION cert.kernel_knot_alexander(p_witness jsonb)
+RETURNS TABLE(ok boolean, evidence jsonb) LANGUAGE plpgsql AS $f$
+DECLARE n int; braid jsonb; m int; prod jsonb; g int; r int; c int; row jsonb;
+        MmI jsonb; lhs jsonb; cycl jsonb := '{}'::jsonb; e int;
+        alex jsonb; min_exp int; delta jsonb := '{}'::jsonb; j int := 0;
+        rhs jsonb; v_ok boolean; det_m1 bigint; k text; v bigint;
+BEGIN
+  IF p_witness->>'n' IS NULL OR jsonb_typeof(p_witness->'braid') <> 'array' THEN
+    RETURN QUERY SELECT NULL::boolean, jsonb_build_object('error','need n and braid array'); RETURN;
+  END IF;
+  n := (p_witness->>'n')::int; braid := p_witness->'braid'; m := n-1;
+  IF n < 2 THEN RETURN QUERY SELECT NULL::boolean, jsonb_build_object('error','n>=2'); RETURN; END IF;
+  prod := '[]'::jsonb;                                            -- identity (size m)
+  FOR r IN 0..m-1 LOOP
+    row := '[]'::jsonb;
+    FOR c IN 0..m-1 LOOP row := row || jsonb_build_array(CASE WHEN r=c THEN '{"0":1}'::jsonb ELSE '{}'::jsonb END); END LOOP;
+    prod := prod || jsonb_build_array(row);
+  END LOOP;
+  FOR g IN SELECT value::int FROM jsonb_array_elements_text(braid) LOOP
+    prod := cert.lp_matmul(prod, cert.lp_burau_gen(n, g));
+  END LOOP;
+  MmI := '[]'::jsonb;                                             -- prod - I
+  FOR r IN 0..m-1 LOOP
+    row := '[]'::jsonb;
+    FOR c IN 0..m-1 LOOP
+      IF r=c THEN row := row || jsonb_build_array(cert.lp_add((prod->r)->c, '{"0":-1}'::jsonb));
+      ELSE         row := row || jsonb_build_array((prod->r)->c); END IF;
+    END LOOP;
+    MmI := MmI || jsonb_build_array(row);
+  END LOOP;
+  lhs := cert.lp_det(MmI);
+  FOR e IN 0..n-1 LOOP cycl := jsonb_set(cycl, ARRAY[e::text], to_jsonb(1)); END LOOP;
+  alex := p_witness->'alexander';
+  IF alex IS NULL OR jsonb_typeof(alex) <> 'object' THEN
+    RETURN QUERY SELECT NULL::boolean, jsonb_build_object('error','no asserted alexander','recomputed_det',lhs); RETURN;
+  END IF;
+  min_exp := COALESCE((alex->>'min_exp')::int, 0);
+  FOR v IN SELECT value::bigint FROM jsonb_array_elements_text(alex->'coeffs') LOOP
+    IF v <> 0 THEN delta := jsonb_set(delta, ARRAY[(min_exp+j)::text], to_jsonb(v)); END IF;
+    j := j+1;
+  END LOOP;
+  rhs := cert.lp_mul(delta, cycl);
+  v_ok := cert.lp_canon(lhs) = cert.lp_canon(rhs);
+  det_m1 := NULL;
+  IF p_witness->'asserts' ? 'determinant' THEN
+    det_m1 := 0;
+    FOR k, v IN SELECT key, value::bigint FROM jsonb_each_text(delta) LOOP
+      det_m1 := det_m1 + v * (CASE WHEN (k::int) % 2 = 0 THEN 1 ELSE -1 END);
+    END LOOP;
+    det_m1 := abs(det_m1);
+    v_ok := v_ok AND det_m1 = (p_witness#>>'{asserts,determinant}')::bigint;
+  END IF;
+  RETURN QUERY SELECT v_ok, jsonb_build_object(
+    'kernel','knot_alexander','n',n,'braid_length',jsonb_array_length(braid),
+    'recomputed_det',lhs,'rhs_delta_times_cyclotomic',rhs,
+    'matches_up_to_units', cert.lp_canon(lhs)=cert.lp_canon(rhs),
+    'knot_determinant_abs_delta_at_-1', det_m1);
+END $f$;
+
+INSERT INTO cert.kernel (schema, checker_fn, description) VALUES
+    ('knot_alexander', 'cert.kernel_knot_alexander',
+     'Recompute det(reducedBurau(beta) - I) for a braid beta and check it equals the '
+     'asserted Alexander polynomial times (1+t+...+t^{n-1}) up to a unit; optional knot '
+     'determinant |Delta(-1)|. Independent of, and far cheaper than, finding the braid.')
+ON CONFLICT (schema) DO UPDATE
+    SET checker_fn = EXCLUDED.checker_fn, description = EXCLUDED.description;
+
+-- Corpus demonstrations: classic knots as braid closures (cert_kernel tier).
+INSERT INTO cert.claim (subject_kind, subject_ref, statement, claim_kind, method, probe_sql)
+SELECT 'knot', '{"knot":"trefoil 3_1","braid":"sigma_1^3 in B_2","determinant":3}'::jsonb,
+       'the trefoil (closure of sigma_1^3 in B_2) has Alexander polynomial t^2 - t + 1 and determinant 3',
+       'formal', 'cert_kernel', NULL
+WHERE NOT EXISTS (SELECT 1 FROM cert.claim WHERE statement LIKE 'the trefoil (closure of sigma_1^3%');
+SELECT cert.submit_proof(c.id,
+    '{"schema":"knot_alexander","n":2,"braid":[1,1,1],"alexander":{"min_exp":0,"coeffs":[1,-1,1]},"asserts":{"determinant":3}}'::jsonb,
+    '94_cert_kernel.sql knot corpus seed')
+FROM cert.claim c WHERE c.statement LIKE 'the trefoil (closure of sigma_1^3%';
+
+INSERT INTO cert.claim (subject_kind, subject_ref, statement, claim_kind, method, probe_sql)
+SELECT 'knot', '{"knot":"figure-eight 4_1","braid":"(sigma_1 sigma_2^-1)^2 in B_3","determinant":5}'::jsonb,
+       'the figure-eight knot (closure of (sigma_1 sigma_2^-1)^2 in B_3) has Alexander polynomial t^2 - 3t + 1 and determinant 5',
+       'formal', 'cert_kernel', NULL
+WHERE NOT EXISTS (SELECT 1 FROM cert.claim WHERE statement LIKE 'the figure-eight knot (closure%');
+SELECT cert.submit_proof(c.id,
+    '{"schema":"knot_alexander","n":3,"braid":[1,-2,1,-2],"alexander":{"min_exp":0,"coeffs":[1,-3,1]},"asserts":{"determinant":5}}'::jsonb,
+    '94_cert_kernel.sql knot corpus seed')
+FROM cert.claim c WHERE c.statement LIKE 'the figure-eight knot (closure%';
+
+DO $$ DECLARE c RECORD; BEGIN
+  FOR c IN SELECT id FROM cert.claim WHERE statement LIKE 'the trefoil (closure of sigma_1^3%'
+                                        OR statement LIKE 'the figure-eight knot (closure%'
+  LOOP PERFORM cert.check_kernel(c.id); END LOOP;   -- cert_kernel tier checker
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- 4. derivation DAG activation — the first real cert.derivation (modus ponens).
+--    The ledger has been a pure hash CHAIN (beta1 = 0); per docs/TOOL_ON_TOOL_TOPOLOGY.md
+--    a single modus_ponens conclusion C <= {P, P->Q} raises the tamper-entanglement
+--    beta1 from 0 to 2 (one cycle per premise, since each premise is already
+--    chain-linked to the conclusion). We compose the knot kernel's own output:
+--      P    : trefoil Alexander polynomial = t^2 - t + 1            (cert_kernel)
+--      P->Q : if Delta = t^2 - t + 1 then determinant |Delta(-1)| = 3 (comp_sql, exact)
+--      Q    : the trefoil knot determinant = 3                      (cert_kernel)
+--    ORDER MATTERS: a certificate snapshots its premise hashes at attestation time,
+--    so the derivation must be recorded BEFORE the conclusion Q is checked.
+-- ---------------------------------------------------------------------------
+
+-- P: Alexander polynomial only (no determinant assert)
+INSERT INTO cert.claim (subject_kind, subject_ref, statement, claim_kind, method, probe_sql)
+SELECT 'knot', '{"knot":"trefoil","role":"premise P"}'::jsonb,
+       'derivation-demo: the trefoil (sigma_1^3 in B_2) has Alexander polynomial t^2 - t + 1',
+       'formal', 'cert_kernel', NULL
+WHERE NOT EXISTS (SELECT 1 FROM cert.claim WHERE statement = 'derivation-demo: the trefoil (sigma_1^3 in B_2) has Alexander polynomial t^2 - t + 1');
+SELECT cert.submit_proof(c.id,
+    '{"schema":"knot_alexander","n":2,"braid":[1,1,1],"alexander":{"min_exp":0,"coeffs":[1,-1,1]}}'::jsonb,
+    'derivation-demo premise P')
+FROM cert.claim c WHERE c.statement = 'derivation-demo: the trefoil (sigma_1^3 in B_2) has Alexander polynomial t^2 - t + 1';
+
+-- P->Q: the arithmetic implication, exact and self-contained (|(-1)^2 - (-1) + 1| = 3)
+INSERT INTO cert.claim (subject_kind, subject_ref, statement, claim_kind, method, probe_sql)
+SELECT 'knot', '{"knot":"trefoil","role":"implication P->Q","rule":"determinant = |Delta(-1)|"}'::jsonb,
+       'derivation-demo: if a knot has Alexander polynomial t^2 - t + 1 then its determinant |Delta(-1)| = 3',
+       'computational', 'comp_sql',
+       $p$SELECT (d = 3) AS ok, jsonb_build_object('delta_at_-1', d, 'abs', abs(d)) AS evidence
+          FROM (SELECT abs(1*(-1)^2 - 1*(-1) + 1) AS d) t$p$
+WHERE NOT EXISTS (SELECT 1 FROM cert.claim WHERE statement = 'derivation-demo: if a knot has Alexander polynomial t^2 - t + 1 then its determinant |Delta(-1)| = 3');
+
+-- Q: the conclusion (also independently kernel-checkable, with the determinant assert)
+INSERT INTO cert.claim (subject_kind, subject_ref, statement, claim_kind, method, probe_sql)
+SELECT 'knot', '{"knot":"trefoil","role":"conclusion Q"}'::jsonb,
+       'derivation-demo: the trefoil knot determinant is 3',
+       'formal', 'cert_kernel', NULL
+WHERE NOT EXISTS (SELECT 1 FROM cert.claim WHERE statement = 'derivation-demo: the trefoil knot determinant is 3');
+SELECT cert.submit_proof(c.id,
+    '{"schema":"knot_alexander","n":2,"braid":[1,1,1],"alexander":{"min_exp":0,"coeffs":[1,-1,1]},"asserts":{"determinant":3}}'::jsonb,
+    'derivation-demo conclusion Q')
+FROM cert.claim c WHERE c.statement = 'derivation-demo: the trefoil knot determinant is 3';
+
+-- attest the premises first (no derivation yet)
+DO $$ DECLARE c RECORD; BEGIN
+  FOR c IN SELECT id FROM cert.claim WHERE statement = 'derivation-demo: the trefoil (sigma_1^3 in B_2) has Alexander polynomial t^2 - t + 1'
+  LOOP PERFORM cert.check_kernel(c.id); END LOOP;
+  FOR c IN SELECT id FROM cert.claim WHERE statement = 'derivation-demo: if a knot has Alexander polynomial t^2 - t + 1 then its determinant |Delta(-1)| = 3'
+  LOOP PERFORM cert.check(c.id); END LOOP;
+END $$;
+
+-- record the derivation Q <= {P, P->Q}, THEN attest Q so it snapshots premise hashes
+INSERT INTO cert.derivation (conclusion_id, premise_ids, rule)
+SELECT q.id, ARRAY[p.id, pq.id], 'modus_ponens'
+FROM cert.claim q, cert.claim p, cert.claim pq
+WHERE q.statement  = 'derivation-demo: the trefoil knot determinant is 3'
+  AND p.statement  = 'derivation-demo: the trefoil (sigma_1^3 in B_2) has Alexander polynomial t^2 - t + 1'
+  AND pq.statement = 'derivation-demo: if a knot has Alexander polynomial t^2 - t + 1 then its determinant |Delta(-1)| = 3'
+  AND NOT EXISTS (SELECT 1 FROM cert.derivation d WHERE d.conclusion_id = q.id);
+
+DO $$ DECLARE c RECORD; BEGIN
+  FOR c IN SELECT id FROM cert.claim WHERE statement = 'derivation-demo: the trefoil knot determinant is 3'
+  LOOP PERFORM cert.check_kernel(c.id); END LOOP;
+END $$;

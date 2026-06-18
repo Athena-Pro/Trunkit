@@ -7,12 +7,14 @@
 --
 -- Idempotent: ON CONFLICT DO NOTHING.
 
--- Register sequences in calx.sequences (required FK for sequence_terms)
-INSERT INTO calx.sequences (seq_id, name, seq_type)
+-- Register sequences in calx.sequences (required FK for sequence_terms).
+-- family is set (= seq_type) so downstream homology/combined engines and their
+-- tools don't trip on NULL family (the seq_homology print + same_family logic).
+INSERT INTO calx.sequences (seq_id, name, seq_type, family)
 VALUES
-    ('A000040', 'The prime numbers',                          'prime'),
-    ('A000045', 'Fibonacci numbers: F(n) = F(n-1) + F(n-2)', 'recurrence'),
-    ('A000290', 'The squares: a(n) = n^2',                   'polynomial')
+    ('A000040', 'The prime numbers',                          'prime',      'prime'),
+    ('A000045', 'Fibonacci numbers: F(n) = F(n-1) + F(n-2)', 'recurrence', 'recurrence'),
+    ('A000290', 'The squares: a(n) = n^2',                   'polynomial', 'polynomial')
 ON CONFLICT (seq_id) DO NOTHING;
 
 -- 60 primes (A000040) from calx.primes

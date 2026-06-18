@@ -142,13 +142,30 @@ def _h1_graph(verts: list[int], edges: list[tuple[int, int]]) -> tuple[int, int,
 def main() -> int:
     with psycopg.connect(PG_DSN) as conn:
         with conn.cursor() as cur:
-            # calx bedrock: primes per n, and bigomega per n
-            cur.execute("SELECT n, prime, exponent FROM calx.factorizations")
+            # calx bedrock: primes per n, and bigomega per n. Only ever consulted
+            # for terms that actually appear in the corpus sequences (a few hundred
+            # distinct values), so fetch factorizations for exactly those n rather
+            # than streaming the whole calx.factorizations table (tens of millions
+            # of rows -> OOM / dropped connection). Behaviour is identical: any term
+            # above calx's range falls through to trial division as before.
+            cur.execute("SELECT max(n) FROM calx.factorizations")
+            nmax = cur.fetchone()[0] or 0
+            cur.execute("SELECT DISTINCT term FROM kan.sequence_terms")
+            needed = sorted({int(r[0]) for r in cur.fetchall() if 2 <= int(r[0]) <= nmax})
+
             bed_primes: dict[int, set[int]] = {}
             bed_big: dict[int, int] = {}
-            for n, p, e in cur.fetchall():
-                bed_primes.setdefault(n, set()).add(p)
-                bed_big[n] = bed_big.get(n, 0) + e
+            if needed:
+                cur.execute(
+                    "SELECT n, prime, exponent FROM calx.factorizations "
+                    "WHERE n = ANY(%s)",
+                    (needed,),
+                )
+                for n, p, e in cur.fetchall():
+                    bed_primes.setdefault(n, set()).add(p)
+                    bed_big[n] = bed_big.get(n, 0) + e
+            print(f"  bedrock: {len(bed_primes)} of {len(needed)} corpus terms "
+                  f"factored from calx (n <= {nmax}); rest by trial division")
 
             cur.execute("SELECT seq_id FROM calx.sequences ORDER BY seq_id")
             seq_ids = [r[0] for r in cur.fetchall()]
