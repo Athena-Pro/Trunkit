@@ -42,10 +42,10 @@ Just PostgreSQL, Python, and ~1.5 MB of schemas.
 
 | Layer | Role |
 |-------|------|
-| **calx** | Dense prime factorisation of ℤ[1..N]; aliquot/derivative dynamics; CRT; OEIS sequence matching |
+| **calx** | Dense prime factorisation of ℤ[1..N]; aliquot/derivative dynamics; CRT; OEIS exact + **cosine-candidate** matching; **C-finite/P-finite recurrence certificates** |
 | **curry** | Immutable versioned constants and functions; append-only computational provenance |
 | **kan** | Category-*structured* meta-layer: reflects Postgres FK graphs into objects/morphisms and checks **structural invariants** (triangle commutativity, product universal property, naturality, epi classification) as re-runnable probes — see the caveat below |
-| **cert** | Proof-carrying attestation: five method tiers, structured witness storage, proof composition DAG, portable bundle export, consumer re-verification |
+| **cert** | Proof-carrying attestation: five method tiers, structured witness storage, proof composition DAG, portable bundle export, consumer re-verification; **exact-domain shield**, **recurrence/morphism certificates**, **holographic (Merkle) commitments**, **image anchoring** |
 | **Nerode** | DFA/automata engine on PostgreSQL: construction, minimization, product, session DFAs, sequence cache, certified handoff envelopes |
 | **Porter** | Agent context handoff: pre-pack external data, certify session boundaries, hand verified context to a new model with zero tool calls |
 
@@ -185,6 +185,10 @@ trunkit close [--write]
 trunkit witness <claim_id> --kind KIND --body JSON [--write]
 # Attach a structured proof witness to a claim.
 # KIND: term | trace | counterexample | hash_chain | kan_diagram
+
+trunkit register-lean <claim_id> --root DIR --decl Module.thm [--write]
+# Register a Lean (Lake) project + declaration as a formal_external artifact.
+# Re-checked by tools/lean_check.sh: lake build + axiom / `sorry` audit.
 ```
 
 ### calx data
@@ -197,6 +201,7 @@ trunkit reset                          # drop all calx tables
 trunkit oeis-load [--family F]         # fetch curated OEIS b-files
 trunkit oeis-match [--orbit-id ID | --all]
 trunkit compose-match
+trunkit oeis-cosine --seq-id A000045    # scale-invariant growth-shape candidates, confirmed by exact prefix
 ```
 
 ---
@@ -262,6 +267,24 @@ conn.execute(
 | `empirical_corpus` | Provenance only | Corpus document assertions |
 | `witness_carry` | In-DB witness term | Structured proof terms stored alongside certificates; consumer-replayable |
 
+> **Exactness shield.** Every claim also carries a `domain` tag (`exact_int` /
+> `rational` / `algebraic` / `interval` / `float_heuristic`). A ledger trigger
+> guarantees a `float_heuristic` claim can **never** record a `valid`
+> certificate — only `unverified`. Heuristics (e.g. cosine similarity)
+> *propose*; exact probes *decide*.
+
+---
+
+## Attestable structures (calx / cert)
+
+Beyond integer-fact and categorical claims, cert ships re-checkable, **exact** certificate families:
+
+- **Recurrence certificates** — a C-finite/P-finite recurrence (coefficients + initial terms) regenerates a sequence; `cert.recurrence_*` verifies it exactly and refuses non-exact division.
+- **Sequence morphisms** — `cert.morphism_*` proves an exact map (scale / affine / index-shift) between two sequences — the structural relation a cosine candidate only hints at.
+- **OEIS cosine candidates** — `calx.oeis_cosine_candidates` surfaces scale-invariant growth-shape neighbours, each confirmed by exact prefix agreement.
+- **Image anchoring + similarity** — `cert.image_*` anchors a figure by sha256 and scores perceptual cosine similarity (pure-SQL; the `[image]` extra is only for decoding).
+- **Holographic commitments** — `cert.merkle_root` / `cert.claim_commitment` commit an arbitrarily long trace to a 32-byte root (core `sha256`).
+
 ---
 
 ## PCC properties
@@ -279,7 +302,7 @@ conn.execute(
 
 | Component | Files | Size |
 |-----------|-------|------|
-| SQL (00–96) | 99 | ~603 KB |
+| SQL (calx 00–96 + nerode 00–C0) | ~118 | ~704 KB |
 | Python tools | 47 | ~393 KB |
 | Proof scripts | 4 | ~23 KB |
 | Src + tests + config | ~69 | ~558 KB |
@@ -289,7 +312,8 @@ For scale only (not a capability comparison): a Lean 4 toolchain is ≈ 2.9 GB
 per version and a compiled Mathlib ≈ 4–10 GB per project. **Trunkit is not a
 substitute for a proof assistant** — Lean/Mathlib verify arbitrary
 human-authored theorems, whereas Trunkit re-checks a fixed, small set of
-certificate schemas (factorization, CRT, Egyptian fractions, matrix words) plus
+certificate schemas (factorization, CRT, Egyptian fractions, matrix words,
+recurrence & morphism certificates, image / OEIS cosine candidates) plus
 re-runnable in-DB probes. The size figures say only that Trunkit fits in a
 database you already run; they do **not** imply equivalent verification power.
 
@@ -300,8 +324,10 @@ database you already run; they do **not** imply equivalent verification power.
 ```
 src/
   calx/       — Trunkit Python package (calx + kan + curry + cert)
+              + leanbridge.py · imagefeatures.py · recurrence.py
   nerode/     — Nerode/Porter Python package
-    sql/      — 23 idempotent SQL schema files (00_bootstrap → 97_composite_dfa)
+    sql/      — 38 idempotent SQL schema files (00_bootstrap → C0_verify),
+                incl. quantitative EHA/WFFA (A0–A6) + Porter policy gate (B0–B4, C0)
     precache.py   — Precacher context manager (Porter API)
     sources.py    — WeatherSource, TickerSource, HNSource, TickerHistorySource
     adapters.py   — HttpSource, CallableSource, resolve(), with_retry()
@@ -317,7 +343,10 @@ tests/
 proofs/
   *.py    — Trunkit proof scripts
 tools/
-  kan_in_kan.py   — Trunkit reflexive closure tool
+  cert_formal.py                        — formal-tier harness (python + lean checkers)
+  lean_check.sh, AxiomAudit.lean        — Lean bridge driver + axiom/`sorry` auditor
+  image_features.py, figure_extract.py  — vision tools ([image] extra)
+  oeis_loader.py, oeis_match.py, compose_match.py — OEIS workflows
 ```
 
 ---
