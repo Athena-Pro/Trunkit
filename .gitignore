@@ -46,3 +46,16 @@ Users*/
 .curry/
 
 .pr_body.md
+
+# Loom layer (bespoke arithmetic of orthogonal F_1 axes) -- local, untracked
+docs/LOOM_ORTHOGONAL_F1.md
+local/sql/97_kan_loom.sql
+local/sql/98_cert_loom.sql
+local/sql/99_loom_lift.sql
+local/tools/build_loom.py
+local/tools/build_loom_lift.py
+local/tests/test_loom.py
+local/tests/test_loom_lift.py
+local/backups/
+proofs/loom.py
+proofs/loom_lift.py

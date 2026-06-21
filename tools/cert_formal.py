@@ -36,6 +36,14 @@ PG_DSN = os.environ.get(
     "CALX_DSN", "postgresql://trunk:trunk@localhost:5434/trunk"
 )
 
+# Lean bridge (T1): shared digest recipe + axiom gate. Importing calx requires
+# src/ on the path when this harness is run as a standalone script.
+sys.path.insert(0, str(PROJECT_DIR / "src"))
+try:
+    from calx import leanbridge
+except Exception:  # pragma: no cover - lean branch simply disabled if unavailable
+    leanbridge = None
+
 # Known formal claims -> their backing artifact. (Worked example; extend here
 # or register artifacts directly via cert.register_artifact.)
 FORMAL_ARTIFACTS = {
@@ -162,6 +170,9 @@ FORMAL_ARTIFACTS = {
 }
 
 CHECKER_TIMEOUT = 60
+# Lean+Mathlib builds are minutes, not seconds.
+LEAN_CHECKER_TIMEOUT = int(os.environ.get("LEAN_CHECKER_TIMEOUT", "1200"))
+LEAN_ALLOW_NATIVE = os.environ.get("LEAN_AUDIT_ALLOW_NATIVE") is not None
 
 
 def sha256_file(p: Path) -> str:
@@ -209,6 +220,81 @@ def append_certificate(cur, claim_id, status, evidence, valid_under, statement, 
     return seq
 
 
+def verify_lean(project_root, file_digests, trusted, checker_cmd, toolchain):
+    """Re-check a Lean artifact: closure-drift gate, then build+axiom audit.
+
+    Returns (status, evidence, extra_valid_under). Pure of DB side effects.
+    """
+    root = (PROJECT_DIR / project_root).resolve()
+    extra_vu = {"toolchain": toolchain}
+    if leanbridge is None:
+        return "error", {"reason": "calx.leanbridge unavailable"}, extra_vu
+    if not root.is_dir():
+        return "error", {"reason": "lean project_root missing", "path": str(root)}, extra_vu
+
+    # Drift gate: recompute the closure digest over the registered file set.
+    rels = list((file_digests or {}).keys())
+    try:
+        current = leanbridge.closure_digest(
+            leanbridge.compute_file_digests(root, rels)
+        )
+    except FileNotFoundError as exc:
+        return "refuted", {"reason": "closure file missing", "detail": str(exc)}, extra_vu
+    extra_vu["artifact_sha256"] = current
+    if trusted is not None and current != trusted:
+        return (
+            "refuted",
+            {"reason": "lean closure drift (untrusted change)",
+             "expected": trusted, "got": current},
+            extra_vu,
+        )
+
+    # Build + axiom/sorry audit via the registered checker command.
+    try:
+        proc = subprocess.run(
+            checker_cmd, cwd=str(PROJECT_DIR), shell=True,
+            capture_output=True, text=True, timeout=LEAN_CHECKER_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return "error", {"reason": "lean checker timeout", "checker_cmd": checker_cmd}, extra_vu
+
+    audit = None
+    for line in reversed(proc.stdout.strip().splitlines()):
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                audit = json.loads(line)
+                break
+            except ValueError:
+                continue
+
+    evidence = {
+        "checker_cmd": checker_cmd,
+        "exit_code": proc.returncode,
+        "stdout_tail": proc.stdout.strip()[-600:],
+        "stderr_tail": proc.stderr.strip()[-200:],
+        "artifact_sha256": current,
+        "kind": "lean",
+    }
+    if audit is None:
+        evidence["reason"] = "no JSON verdict from lean checker"
+        return "error", evidence, extra_vu
+
+    axioms = audit.get("axioms", [])
+    uses_sorry = bool(audit.get("uses_sorry", False))
+    evidence.update({
+        "decl": audit.get("decl"),
+        "type": audit.get("type"),
+        "axioms": axioms,
+        "uses_sorry": uses_sorry,
+        "allow_native": LEAN_ALLOW_NATIVE,
+    })
+    ok = (proc.returncode == 0) and leanbridge.audit_ok(
+        axioms, uses_sorry, allow_native=LEAN_ALLOW_NATIVE
+    )
+    return ("valid" if ok else "refuted"), evidence, extra_vu
+
+
 def main() -> int:
     rc = 0
     with psycopg.connect(PG_DSN) as conn:
@@ -225,16 +311,20 @@ def main() -> int:
             for claim_id, statement in claims:
                 spec = FORMAL_ARTIFACTS.get(statement)
                 cur.execute(
-                    "SELECT kind, path, sha256, checker_cmd FROM cert.artifact "
-                    "WHERE claim_id=%s",
+                    "SELECT kind, path, sha256, checker_cmd, "
+                    "       project_root, file_digests, toolchain "
+                    "FROM cert.artifact WHERE claim_id=%s",
                     (claim_id,),
                 )
                 art = cur.fetchone()
+                project_root = file_digests = toolchain = None
 
                 if art is None:
                     if spec is None:
                         print(f"  [SKIP] claim {claim_id}: no artifact + no known spec")
                         continue
+                    # TOFU registration path is for single-file (python/file) artifacts;
+                    # Lean artifacts must be registered first via `trunkit register-lean`.
                     fpath = (PROJECT_DIR / spec["path"]).resolve()
                     if not fpath.is_file():
                         print(f"  [ERR ] artifact missing: {fpath}")
@@ -252,46 +342,54 @@ def main() -> int:
                     print(f"  [TOFU] registered artifact for claim {claim_id}: "
                           f"{path} sha256={digest[:12]}…")
                 else:
-                    kind, path, trusted, checker_cmd = art
+                    (kind, path, trusted, checker_cmd,
+                     project_root, file_digests, toolchain) = art
 
-                fpath = (PROJECT_DIR / path).resolve()
                 vu = {
                     "calx_schema_version": calx_schema_version(cur),
                     "artifact_path": path,
                 }
 
-                if not fpath.is_file():
-                    status = "error"
-                    evidence = {"reason": "artifact missing", "path": str(fpath)}
+                if kind == "lean":
+                    status, evidence, extra_vu = verify_lean(
+                        project_root or path, file_digests, trusted,
+                        checker_cmd, toolchain,
+                    )
+                    vu.update(extra_vu)
                 else:
-                    current = sha256_file(fpath)
-                    vu["artifact_sha256"] = current
-                    if trusted is not None and current != trusted:
-                        status = "refuted"
-                        evidence = {
-                            "reason": "artifact hash drift (untrusted change)",
-                            "expected": trusted, "got": current,
-                        }
+                    fpath = (PROJECT_DIR / path).resolve()
+                    if not fpath.is_file():
+                        status = "error"
+                        evidence = {"reason": "artifact missing", "path": str(fpath)}
                     else:
-                        try:
-                            proc = subprocess.run(
-                                checker_cmd, cwd=str(PROJECT_DIR), shell=True,
-                                capture_output=True, text=True,
-                                timeout=CHECKER_TIMEOUT,
-                            )
-                            status = "valid" if proc.returncode == 0 else "refuted"
+                        current = sha256_file(fpath)
+                        vu["artifact_sha256"] = current
+                        if trusted is not None and current != trusted:
+                            status = "refuted"
                             evidence = {
-                                "checker_cmd": checker_cmd,
-                                "exit_code": proc.returncode,
-                                "stdout_tail": proc.stdout.strip()[-400:],
-                                "stderr_tail": proc.stderr.strip()[-200:],
-                                "artifact_sha256": current,
-                                "kind": kind,
+                                "reason": "artifact hash drift (untrusted change)",
+                                "expected": trusted, "got": current,
                             }
-                        except subprocess.TimeoutExpired:
-                            status = "error"
-                            evidence = {"reason": "checker timeout",
-                                        "checker_cmd": checker_cmd}
+                        else:
+                            try:
+                                proc = subprocess.run(
+                                    checker_cmd, cwd=str(PROJECT_DIR), shell=True,
+                                    capture_output=True, text=True,
+                                    timeout=CHECKER_TIMEOUT,
+                                )
+                                status = "valid" if proc.returncode == 0 else "refuted"
+                                evidence = {
+                                    "checker_cmd": checker_cmd,
+                                    "exit_code": proc.returncode,
+                                    "stdout_tail": proc.stdout.strip()[-400:],
+                                    "stderr_tail": proc.stderr.strip()[-200:],
+                                    "artifact_sha256": current,
+                                    "kind": kind,
+                                }
+                            except subprocess.TimeoutExpired:
+                                status = "error"
+                                evidence = {"reason": "checker timeout",
+                                            "checker_cmd": checker_cmd}
 
                 seq = append_certificate(
                     cur, claim_id, status, evidence, vu, statement, kind

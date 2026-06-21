@@ -236,6 +236,27 @@ def cmd_snap(args: argparse.Namespace) -> None:
         _json_out(row[0])
 
 
+def cmd_verify(args: argparse.Namespace) -> None:
+    """Re-verify a nerode cert claim (side-effect-free), dispatching by witness kind.
+
+    Handles payoff_trace / gate_decision / ledger_snapshot / session-trace claims
+    through nerode.verify(). Consumer-safe: no INSERTs.
+    """
+    with connect(args.dsn) as conn:
+        row = conn.execute(
+            "SELECT ok, evidence, witness FROM nerode.verify(%s)",
+            (args.claim_id,),
+        ).fetchone()
+    if row is None:
+        _die(f"claim {args.claim_id} not found")
+    ok, evidence, _witness = row
+    flag = {True: "✓", False: "✗", None: "?"}[ok]
+    verdict = {True: "valid", False: "refuted", None: "unverified"}[ok]
+    kind = (evidence or {}).get("kind", "?")
+    print(f"  [{flag}] claim {args.claim_id}  {verdict}  (kind={kind})")
+    _json_out({"claim_id": args.claim_id, "ok": ok, "verdict": verdict, "evidence": evidence})
+
+
 def cmd_products(args: argparse.Namespace) -> None:
     """Show pairwise intersection products of corpus DFAs (bound vs actual)."""
     with connect(args.dsn) as conn:
@@ -411,6 +432,10 @@ def build_parser() -> argparse.ArgumentParser:
     # snap
     sub.add_parser("snap", help="Certification snapshot.")
 
+    # verify
+    pvf = sub.add_parser("verify", help="Re-verify a cert claim by witness kind (no writes).")
+    pvf.add_argument("claim_id", type=int, metavar="CLAIM_ID")
+
     # corpus
     pc2 = sub.add_parser("corpus", help="Named DFA corpus: list or certify.")
     pc2.add_argument("--list",    action="store_true", help="List corpus entries (default).")
@@ -439,6 +464,7 @@ _DISPATCH = {
     "close":  cmd_close,
     "facts":  cmd_facts,
     "snap":   cmd_snap,
+    "verify": cmd_verify,
     "corpus":    cmd_corpus,
     "products":  cmd_products,
     "morphisms": cmd_morphisms,

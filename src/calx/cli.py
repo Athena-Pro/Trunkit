@@ -203,6 +203,46 @@ def _cmd_attest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_register_lean(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from . import leanbridge
+
+    root = Path(args.root)
+    if not root.is_dir():
+        print(f"  error: project root not found: {root}")
+        return 2
+    rels = leanbridge.discover_closure(root)
+    if not rels:
+        print(f"  error: no closure files (lakefile / lean-toolchain / *.lean) under {root}")
+        return 2
+    file_digests = leanbridge.compute_file_digests(root, rels)
+    digest = leanbridge.closure_digest(file_digests)
+    toolchain = leanbridge.read_toolchain(root)
+    checker = args.checker or leanbridge.default_checker_cmd(args.root, args.decl)
+
+    if not args.write:
+        print(f"  [dry-run] would register lean artifact for claim {args.claim_id}")
+        print(f"    project_root : {args.root}")
+        print(f"    target_decl  : {args.decl}")
+        print(f"    files        : {len(rels)}  closure_digest={digest[:12]}…")
+        print(f"    toolchain    : {toolchain}")
+        print(f"    checker_cmd  : {checker}")
+        print("  pass --write to register")
+        return 0
+
+    with db.connect(args.dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT (cert.register_lean_artifact(%s,%s,%s,%s::jsonb,%s::jsonb,%s,%s)).id",
+            (args.claim_id, args.root, args.decl, json.dumps(file_digests),
+             json.dumps(toolchain), digest, checker),
+        )
+        art_id = cur.fetchone()[0]
+    print(f"  registered lean artifact {art_id} for claim {args.claim_id} "
+          f"({len(rels)} files, decl {args.decl})")
+    return 0
+
+
 def _cmd_close(args: argparse.Namespace) -> int:
     if not args.write:
         print("  [dry-run] would compute reflexive closure")
@@ -340,6 +380,37 @@ def _cmd_oeis_match(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_oeis_cosine(args: argparse.Namespace) -> int:
+    with db.connect(args.dsn) as conn, conn.cursor() as cur:
+        if args.rebuild:
+            cur.execute("SELECT DISTINCT seq_id FROM sequence_membership")
+            ids = [r[0] for r in cur.fetchall()]
+            for sid in ids:
+                cur.execute("SELECT calx.build_seq_vector(%s, %s)", (sid, args.k))
+            print(f"rebuilt {len(ids)} sequence vectors (k={args.k})")
+        # ensure the query has a descriptor (build from membership if absent)
+        cur.execute("SELECT 1 FROM calx.seq_vector WHERE seq_id = %s", (args.seq_id,))
+        if not cur.fetchone():
+            try:
+                cur.execute("SELECT calx.build_seq_vector(%s, %s)", (args.seq_id, args.k))
+            except psycopg.Error as exc:
+                print(f"  error: {str(exc).strip()}")
+                return 1
+        cur.execute(
+            "SELECT seq_id, cosine, exact_prefix "
+            "FROM calx.oeis_cosine_candidates(%s, %s)", (args.seq_id, args.top))
+        rows = cur.fetchall()
+    if not rows:
+        print(f"  no candidates (is more than one sequence vectorised? try --rebuild)")
+        return 0
+    print(f"  cosine candidates for {args.seq_id} (cosine = growth-shape; exact = leading-term agreement):")
+    for sid, cos, ex in rows:
+        flag = "EXACT✓" if ex is not None and ex >= args.k else f"exact_prefix={ex}"
+        print(f"    {cos:+.4f}  {sid:<20} {flag}")
+    print("  note: cosine is a scale-invariant pre-filter; confirm identity with exact_prefix.")
+    return 0
+
+
 def _cmd_compose_match(args: argparse.Namespace) -> int:
     mod = _load_tools_module("compose_match", "compose_match.py")
     with db.connect(args.dsn) as conn:
@@ -409,6 +480,15 @@ def build_parser() -> argparse.ArgumentParser:
     at.add_argument("--write", action="store_true", help="record certificates (dry-run without)")
     at.set_defaults(func=_cmd_attest)
 
+    rl = sub.add_parser("register-lean",
+                        help="register a Lean proof project as a formal-tier artifact")
+    rl.add_argument("claim_id", type=int)
+    rl.add_argument("--root", required=True, help="repo-relative Lake project dir")
+    rl.add_argument("--decl", required=True, help="fully-qualified target declaration")
+    rl.add_argument("--checker", help="override checker command (e.g. a sandbox wrapper)")
+    rl.add_argument("--write", action="store_true", help="register (dry-run without)")
+    rl.set_defaults(func=_cmd_register_lean)
+
     cl = sub.add_parser("close", help="reflexive closure — curry fixed points + kan eigenform")
     cl.add_argument("--write", action="store_true",
                     help="record eigenform claims (dry-run without)")
@@ -469,6 +549,15 @@ def build_parser() -> argparse.ArgumentParser:
     om.add_argument("--prefix", type=int, default=8)
     om.add_argument("--no-sync-membership", action="store_true")
     om.set_defaults(func=_cmd_oeis_match)
+
+    oc = sub.add_parser("oeis-cosine",
+                        help="cosine candidate generator: growth-shape neighbours, confirmed by exact prefix")
+    oc.add_argument("--seq-id", required=True, help="query sequence id (e.g. A000045)")
+    oc.add_argument("--k", type=int, default=16, help="prefix length to vectorise")
+    oc.add_argument("--top", type=int, default=5, help="number of candidates")
+    oc.add_argument("--rebuild", action="store_true",
+                    help="(re)build descriptors for all sequences with membership first")
+    oc.set_defaults(func=_cmd_oeis_cosine)
 
     cm = sub.add_parser("compose-match", help="Tier 3 compose_index + OEIS search")
     cm.add_argument("--static-only", action="store_true")

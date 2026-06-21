@@ -41,6 +41,12 @@ Repository = "https://github.com/Athena-Pro/Trunkit"
 binary = [
   "psycopg[binary]>=3.2,<4",
 ]
+# Vision layer: only the out-of-package tool tools/image_features.py needs an
+# image decoder. The calx core (descriptors math, cosine, registry) stays
+# psycopg-only; install this extra only to compute descriptors from real images.
+image = [
+  "pillow>=10",
+]
 dev = [
   "psycopg[binary]>=3.2,<4",
   "pytest>=8",
