@@ -401,9 +401,10 @@ def _cmd_oeis_cosine(args: argparse.Namespace) -> int:
             "FROM calx.oeis_cosine_candidates(%s, %s)", (args.seq_id, args.top))
         rows = cur.fetchall()
     if not rows:
-        print(f"  no candidates (is more than one sequence vectorised? try --rebuild)")
+        print("  no candidates (is more than one sequence vectorised? try --rebuild)")
         return 0
-    print(f"  cosine candidates for {args.seq_id} (cosine = growth-shape; exact = leading-term agreement):")
+    print(f"  cosine candidates for {args.seq_id} "
+          "(cosine = growth-shape; exact = leading-term agreement):")
     for sid, cos, ex in rows:
         flag = "EXACT✓" if ex is not None and ex >= args.k else f"exact_prefix={ex}"
         print(f"    {cos:+.4f}  {sid:<20} {flag}")
@@ -550,8 +551,10 @@ def build_parser() -> argparse.ArgumentParser:
     om.add_argument("--no-sync-membership", action="store_true")
     om.set_defaults(func=_cmd_oeis_match)
 
-    oc = sub.add_parser("oeis-cosine",
-                        help="cosine candidate generator: growth-shape neighbours, confirmed by exact prefix")
+    oc = sub.add_parser(
+        "oeis-cosine",
+        help="cosine candidate generator: growth-shape neighbours, "
+             "confirmed by exact prefix")
     oc.add_argument("--seq-id", required=True, help="query sequence id (e.g. A000045)")
     oc.add_argument("--k", type=int, default=16, help="prefix length to vectorise")
     oc.add_argument("--top", type=int, default=5, help="number of candidates")
