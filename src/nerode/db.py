@@ -42,6 +42,25 @@ SCHEMA_FILES = (
     "95_cybernetic_automata.sql", # Phase 3f — cybernetic control DFAs
     "96_dead_time_factory.sql",  # Phase 3g — ensure_dead_time(k) factory
     "97_composite_dfa.sql",     # Phase 3h — paired-alphabet projection + composite DFAs
+    # Phase 4 — quantitative automata (EHA/WFFA) + exact extremal analysis.
+    # arXiv:2606.11223 "Scenario Constraints with Memory". Order is dependency-
+    # critical: A0 (interval type) must precede everything that declares it.
+    "A0_interval.sql",          # Phase 4a — interval algebra I(D)
+    "A1_eha.sql",               # Phase 4b — event history automata + compile_eha
+    "A2_wffa.sql",              # Phase 4c — weighted finance automata + payoff_eval
+    "A3_wffa_product.sql",      # Phase 4d — scenario-restricted product (Thm 2)
+    "A4_extremal.sql",          # Phase 4e — exact best/worst-case DP + witness (Thm 3)
+    "A5_extremal_cert.sql",     # Phase 4f — carried certificates + consistency check
+    "A6_monotonicity.sql",      # Phase 4g — cross-scenario monotonicity probe
+    # Phase 5 — Porter policy gate (LedgerAgent, arXiv:2606.20529). Ledger must
+    # precede the policy registry, gate, and cert bridge.
+    "B0_ledger.sql",            # Phase 5a — schema-anchored ledger (Absorb/Render)
+    "B1_policy.sql",            # Phase 5b — policy predicate registry (Π)
+    "B2_gate.sql",              # Phase 5c — policy_gate (GateFilter: ALLOW/REVISE/BLOCK)
+    "B3_gate_cert.sql",         # Phase 5d — proof-carrying decisions + replay + drift
+    "B4_carry.sql",             # Phase 5e — carry the ledger across the Porter handoff
+    # Phase 6 — unified witness-kind re-verification.
+    "C0_verify.sql",            # Phase 6a — nerode.verify() dispatches by witness kind
 )
 
 

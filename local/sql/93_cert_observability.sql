@@ -39,7 +39,7 @@ SELECT cl.id AS claim_id,
     WHEN cl.subject_kind IN ('trunkit_method','cert_soundness') THEN 'Methods & self-checks'
     WHEN cl.subject_kind LIKE 'curry_%' THEN 'Curry (provenance)'
     WHEN cl.subject_kind IN ('homology_fact','sequence_homology','factorial_homology','shared_prime_h2') THEN 'Math: homology'
-    WHEN cl.subject_kind LIKE 'kan_%' OR cl.subject_kind IN ('lithon','shadow','moonshine','grading','bigrading','chromatic','equipment','strata_tower','colimit_closure','identity_decomposition','self_shadow','self_syzygy','f1_radix','prime_members_functor','combined_scale','combined_signature','developed_sequence','omega_family','omega_family_succ') THEN 'Math: kan engines'
+    WHEN cl.subject_kind LIKE 'kan_%' OR cl.subject_kind IN ('lithon','shadow','moonshine','grading','bigrading','chromatic','equipment','strata_tower','colimit_closure','identity_decomposition','self_shadow','self_syzygy','f1_radix','prime_members_functor','combined_scale','combined_signature','developed_sequence','omega_family','omega_family_succ','loom_frame','loom_lift') THEN 'Math: kan engines'
     ELSE 'Other' END AS area,
   s.status,
   CASE s.status WHEN 'valid' THEN '✅ verified' WHEN 'refuted' THEN '❌ failed'
