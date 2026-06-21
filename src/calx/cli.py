@@ -249,9 +249,14 @@ def _cmd_close(args: argparse.Namespace) -> int:
         print("  curry fixed points + kan Perron-Frobenius attractor")
         print("  pass --write to execute and record eigenform claims")
         return 0
+    if _resolve_tool("kan_in_kan.py") is None:
+        print("  reflexive closure (kan-in-kan self-analysis) is a local extension,")
+        print("  not part of the base package. It lives at local/tools/kan_in_kan.py")
+        print("  in a repo checkout / local overlay; install that to enable `close`.")
+        return 2
     mod = _load_tools_module("kan_in_kan", "kan_in_kan.py")
-    mod.main()
-    return 0
+    rc = mod.main()
+    return rc if isinstance(rc, int) else 0
 
 
 def _cmd_witness(args: argparse.Namespace) -> int:
@@ -575,12 +580,30 @@ def build_parser() -> argparse.ArgumentParser:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _load_tools_module(module_name: str, filename: str):
-    import importlib.util
+def _resolve_tool(filename: str):
+    """Locate a tool script: shipped ``tools/`` first, then the ``local/`` overlay.
+
+    Returns a ``Path`` if found, else ``None``. Project-specific tools (e.g. the
+    kan-in-kan self-analysis that backs ``trunkit close``) live under
+    ``local/tools/`` in a repo checkout and are not part of the base package.
+    """
+    import pathlib
 
     from calx import get_shared_data_dir
 
-    path = get_shared_data_dir("tools") / filename
+    candidates = [
+        get_shared_data_dir("tools") / filename,
+        pathlib.Path(__file__).resolve().parents[2] / "local" / "tools" / filename,
+    ]
+    return next((p for p in candidates if p.is_file()), None)
+
+
+def _load_tools_module(module_name: str, filename: str):
+    import importlib.util
+
+    path = _resolve_tool(filename)
+    if path is None:
+        raise FileNotFoundError(f"tool not found: {filename}")
     spec = importlib.util.spec_from_file_location(module_name, path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = mod
