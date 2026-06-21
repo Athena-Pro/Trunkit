@@ -43,7 +43,7 @@ LANGUAGE plpgsql AS $$
 DECLARE
     v_cmd TEXT := COALESCE(
                     p_checker_cmd,
-                    'scripts/lean_check.sh "' || p_project_root || '" "' || p_target_decl || '"'
+                    'bash -c ''"$(python -c "from calx import get_shared_data_dir; print(get_shared_data_dir(\"tools\") / \"lean_check.sh\")")" "' || p_project_root || '" "' || p_target_decl || '"'''
                   );
     v_row cert.artifact%ROWTYPE;
 BEGIN

@@ -67,7 +67,9 @@ class Decision:
         return self.verdict == "ALLOW"
 
 
-def register_gated_tool(tool: str, description: str | None = None, *, dsn: str | None = None) -> None:
+def register_gated_tool(
+    tool: str, description: str | None = None, *, dsn: str | None = None
+) -> None:
     """Mark *tool* as environment-changing (governed by the gate)."""
     with psycopg.connect(dsn or resolve_dsn()) as conn:
         conn.execute("SELECT nerode.register_gated_tool(%s, %s)", (tool, description))
@@ -199,7 +201,9 @@ class Warden:
         return bool(row[0]) if row else False
 
     # ------------------------------------------------------------------ Carry
-    def close(self, *, attention_hint: str | None = None, cache_keys: list[str] | None = None) -> dict:
+    def close(
+        self, *, attention_hint: str | None = None, cache_keys: list[str] | None = None
+    ) -> dict:
         """Pack this session's ledger into a cert-verified Porter envelope (Model A).
 
         The returned envelope carries the typed task-state ledger forward, so the
@@ -225,7 +229,7 @@ class Warden:
         new_session_id: str,
         *,
         dsn: str | None = None,
-    ) -> tuple[dict, "Warden"]:
+    ) -> tuple[dict, Warden]:
         """Open a carried envelope for Model B; restore the ledger; return a Warden.
 
         Returns (context, warden) where context includes the restored ``ledger``,

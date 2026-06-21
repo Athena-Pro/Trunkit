@@ -38,8 +38,8 @@ Three new, **purely additive** artifacts plus one harness branch:
 
 ```
 src/calx/sql/41a_cert_formal_lean.sql   -- ALTER cert.artifact (+cols); register_lean_artifact()
-scripts/AxiomAudit.lean                 -- meta-program: axioms + signature + sorry check → JSON
-scripts/lean_check.sh                   -- driver: lake build → run auditor → emit JSON, exit code = verdict
+tools/AxiomAudit.lean                 -- meta-program: axioms + signature + sorry check → JSON
+tools/lean_check.sh                   -- driver: lake build → run auditor → emit JSON, exit code = verdict
 tools/cert_formal.py                    -- ADD a kind=='lean' branch (Python path untouched)
 src/calx/cli.py                         -- ADD `trunkit register-lean` (attest already dispatches)
 ```
@@ -62,7 +62,7 @@ closure_digest := sha256("\n".join(lines))
 
 Helper `cert.register_lean_artifact(claim_id, project_root, target_decl, file_digests, toolchain, closure_digest, checker_cmd)` wraps `cert.register_artifact` with `kind='lean'`, `path := project_root`, `sha256 := closure_digest`. Idempotent, same `ON CONFLICT (claim_id)` upsert as the base.
 
-### 2.2 Lean auditor (G2, G3) — `scripts/AxiomAudit.lean`
+### 2.2 Lean auditor (G2, G3) — `tools/AxiomAudit.lean`
 
 A tiny meta-program, run via `lake env lean --run`, that for `target_decl`:
 
@@ -73,13 +73,13 @@ A tiny meta-program, run via `lake env lean --run`, that for `target_decl`:
 
 The printed `type` is what makes G3 auditable: it travels into the certificate so a consumer can confirm the Lean statement is a faithful formalization of the Erdős problem.
 
-### 2.3 Driver (G4) — `scripts/lean_check.sh`
+### 2.3 Driver (G4) — `tools/lean_check.sh`
 
 `lean_check.sh <project_root> <target_decl>`:
 
 1. `cd <project_root>`; `lake exe cache get` (Mathlib oleans from cache — **no build-from-source, no network during attest**); `lake build <module>` with `LEAN_CHECKER_TIMEOUT` (default 1200 s);
 2. on build failure ⇒ exit 1 (harness ⇒ `refuted`);
-3. else `lake env lean --run ../../scripts/AxiomAudit.lean <target_decl>` and print its JSON to stdout;
+3. else `lake env lean --run ../../tools/AxiomAudit.lean <target_decl>` and print its JSON to stdout;
 4. exit code = auditor's exit code.
 
 Sandboxing is a **deployment wrapper**, not script logic: run the driver under `firejail --net=none --read-only=<root>` (or a rootless container) for untrusted artifacts. Local first-party proofs may skip it, exactly as the Python path does today. State this split explicitly in `SECURITY.md`.
