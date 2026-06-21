@@ -2,17 +2,19 @@
 
 *Prepared 2026-06-21, against live `trunkit` 0.3.0. Evaluates four proposed expansions against Trunkit's design DNA and existing primitives, then recommends a sequence. Same lens as the arXiv/Erdős reviews: what's a true gap, what reuses what we have, and what would break minimality.*
 
+> **STATUS — all four shipped (2026-06-21, merged to `main`):** #4 recurrence certs (`93_cert_recurrence.sql`), #3 exact-domain shield (`94_cert_exactness.sql`), #2 sequence morphisms (`95_cert_morphism.sql`), #1a holographic/Merkle commitments (`96_cert_holographic.sql`). The end-to-end `test_stack_coherence` ties them together; 26 layer tests green. **#1b** (true ZK/STARK) remains deliberately **external-only / future** — a heavy crypto prover stays outside the package behind a `formal_external`-style tier.
+
 ## Design DNA these must respect
 psycopg-only core; everything **in-SQL and re-runnable**; **three-valued honesty** (`valid`/`refuted`/`unverified`); **verify-not-solve** (cert records that a claim was *accepted by a method*, it doesn't discover proofs — the Lean bridge *checks*, it doesn't prove); proofs are **carried + composed** (`cert.derivation` DAG); the ledger is **append-only + hash-chained**; heavy engines live **outside** the package behind an external-checker tier (`formal_external` pattern).
 
 ## Verdict at a glance
 
-| # | Proposal | Fit | Cost | Reuses | Priority |
+| # | Proposal | Fit | Cost | Reuses | Status |
 |---|----------|-----|------|--------|:--:|
-| 4 | C-finite / P-finite recurrence certificates | ★★★ keystone | low | calx numeric exactness, `seq_vector`, `comp_sql` | **1st** |
-| 3 | Exact-domain type shields | ★★★ | low | `A0_interval` (already shipped), `numeric[]`, `cert.check` | **2nd** |
-| 2 | Functorial / morphism hooks | ★★ strong, research-y | med | `kan` functors, Nerode `70_morphism`, `struct_kan` | **3rd** |
-| 1 | Proof compression / succinct | ★★ split | (a) low-med / (b) high | ledger hash-chain, `derivation` DAG | **4th (a); external-only (b)** |
+| 4 | C-finite / P-finite recurrence certificates | ★★★ keystone | low | calx numeric exactness, `seq_vector`, `comp_sql` | ✅ shipped (`93`) |
+| 3 | Exact-domain type shields | ★★★ | low | `A0_interval` (already shipped), `numeric[]`, `cert.check` | ✅ shipped (`94`) |
+| 2 | Functorial / morphism hooks | ★★ strong, research-y | med | `kan` functors, Nerode `70_morphism`, `struct_kan` | ✅ shipped (`95`) |
+| 1 | Proof compression / succinct | ★★ split | (a) low-med / (b) high | ledger hash-chain, `derivation` DAG | ✅ (a) shipped (`96`); ⏳ (b) external-only |
 
 These reinforce each other: a **recurrence certificate (#4)** is *exact* (#3), *compact* (#1a), and the object a *morphism hook* (#2) maps between. The cohesive next arc is **"exact, compact, structural sequence certificates."**
 
