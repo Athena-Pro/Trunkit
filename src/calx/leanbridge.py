@@ -7,7 +7,7 @@ Single source of truth for:
     toolchain).
 
 No database and no `lake` dependency — importing this module is cheap and safe in
-plain CI. The actual build/audit is shelled by scripts/lean_check.sh; this module
+plain CI. The actual build/audit is shelled by tools/lean_check.sh; this module
 only decides, given the auditor's JSON, whether the declaration is acceptable.
 """
 
@@ -101,4 +101,6 @@ def audit_ok(axioms: Iterable[str], uses_sorry: bool, *, allow_native: bool = Fa
 
 
 def default_checker_cmd(project_root: str, target_decl: str) -> str:
-    return f'scripts/lean_check.sh "{project_root}" "{target_decl}"'
+    from calx import get_shared_data_dir
+    script = get_shared_data_dir("tools") / "lean_check.sh"
+    return f'"{script}" "{project_root}" "{target_decl}"'

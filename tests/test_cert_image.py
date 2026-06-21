@@ -17,13 +17,10 @@ from calx import imagefeatures as imf
 
 
 def _calx_dsn():
-    try:
-        from calx import db as calx_db
-        return (os.environ.get("CALX_TEST_DSN")
-                or os.environ.get("ARITHMETIC_DB_TEST_DSN")
-                or calx_db.resolve_dsn())
-    except ImportError:  # pragma: no cover
-        pytest.skip("calx package not installed")
+    dsn = os.environ.get("CALX_TEST_DSN") or os.environ.get("ARITHMETIC_DB_TEST_DSN")
+    if not dsn:
+        pytest.skip("No test DSN provided. Refusing to write to default/production ledger.")
+    return dsn
 
 
 @pytest.fixture()

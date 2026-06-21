@@ -16,13 +16,10 @@ import pytest
 
 
 def _calx_dsn():
-    try:
-        from calx import db as calx_db
-        return (os.environ.get("CALX_TEST_DSN")
-                or os.environ.get("ARITHMETIC_DB_TEST_DSN")
-                or calx_db.resolve_dsn())
-    except ImportError:  # pragma: no cover
-        pytest.skip("calx package not installed")
+    dsn = os.environ.get("CALX_TEST_DSN") or os.environ.get("ARITHMETIC_DB_TEST_DSN")
+    if not dsn:
+        pytest.skip("No test DSN provided. Refusing to write to default/production ledger.")
+    return dsn
 
 
 @pytest.fixture()
@@ -34,6 +31,13 @@ def conn():
     with c:
         yield c
 
+
+@pytest.fixture(autouse=True)
+def _clean_seq_vec(conn):
+    with conn.cursor() as cur:
+        cur.execute("TRUNCATE calx.seq_vector")
+    conn.commit()
+    yield
 
 def _vectorize_py(terms, k=None):
     t = terms[: (k or len(terms))]

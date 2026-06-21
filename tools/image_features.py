@@ -10,7 +10,7 @@ Usage:
     python tools/image_features.py register <image> [--label L] # -> register in DB
 
 Keeping decode here (not in calx core) preserves the psycopg-only core, exactly
-like scripts/lean_check.sh keeps the Lean toolchain outside the package.
+like tools/lean_check.sh keeps the Lean toolchain outside the package.
 """
 
 from __future__ import annotations

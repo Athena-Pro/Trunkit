@@ -5,7 +5,7 @@
 #
 # 1. fetch cached Mathlib oleans (no build-from-source, no network at attest time)
 # 2. `lake build` the project
-# 3. run scripts/AxiomAudit.lean against <decl>; print its JSON verdict to stdout
+# 3. run tools/AxiomAudit.lean against <decl>; print its JSON verdict to stdout
 #
 # Exit code is the verdict consumed by tools/cert_formal.py:
 #   0  -> valid   (built, sorry-free, axioms ⊆ allowed)
