@@ -56,10 +56,21 @@ SELECT c.seq,
        (SELECT cum_terms FROM kan.chromatic_layer x
          WHERE x.seq=c.seq ORDER BY height DESC LIMIT 1) AS top_cum,
        (SELECT count(*) FROM kan.sequence_terms t WHERE t.seq_id=c.seq) AS n_terms,
-       ((SELECT cum_terms FROM kan.chromatic_layer x
-          WHERE x.seq=c.seq ORDER BY height DESC LIMIT 1)
-        = (SELECT count(*) FROM kan.sequence_terms t
-            WHERE t.seq_id=c.seq))            AS converges
+       -- Convergence compares L_top(S) against |S|. When the source
+       -- kan.sequence_terms is empty for this seq, |S| is unknown here (a
+       -- partial/stale load leaves chromatic_layer populated but its source
+       -- gone), so convergence is VACUOUS, not violated. Return NULL, not
+       -- FALSE: emitting FALSE manufactures a contradiction and refutes the
+       -- chromatic laws on what is really a staleness event (see the
+       -- three-valued discipline in 79_cert_kan_engines.sql).
+       CASE WHEN (SELECT count(*) FROM kan.sequence_terms t
+                   WHERE t.seq_id=c.seq) = 0
+            THEN NULL
+            ELSE (SELECT cum_terms FROM kan.chromatic_layer x
+                   WHERE x.seq=c.seq ORDER BY height DESC LIMIT 1)
+                 = (SELECT count(*) FROM kan.sequence_terms t
+                     WHERE t.seq_id=c.seq)
+       END                                        AS converges
   FROM kan.chromatic_layer c
  GROUP BY c.seq;
 
