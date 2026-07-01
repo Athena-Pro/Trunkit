@@ -23,29 +23,31 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-
-# ── Local-first import: honour TRUNKIT_SRC so the server runs against the
-#    checked-out tree without reinstalling every time. ──────────────────────
-_src = os.environ.get("TRUNKIT_SRC")
-if _src and _src not in sys.path:
-    sys.path.insert(0, _src)
-
 import pathlib
+import sys
 import textwrap
 import traceback
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+# ── Local-first import: honour TRUNKIT_SRC so the server runs against the
+#    checked-out tree without reinstalling every time. The calx.* imports below
+#    must follow this path insertion, hence the E402 exemptions. ──────────────
+_src = os.environ.get("TRUNKIT_SRC")
+if _src and _src not in sys.path:
+    sys.path.insert(0, _src)
+
 # ── Import trunkit layers (soft-fail for optional DB layer) ─────────────────
-from calx.kernel import verify_witness, verify_bundle as kernel_verify_bundle
-from calx.ledger import verify_chain
+from calx.kernel import verify_bundle as kernel_verify_bundle  # noqa: E402
+from calx.kernel import verify_witness  # noqa: E402
+from calx.ledger import verify_chain  # noqa: E402
 
 try:
-    import psycopg as _psycopg  # noqa: F401
-    import calx.db as _db
-    import calx.bundle as _bundle_mod
+    import psycopg as _psycopg  # noqa: E402, F401
+
+    import calx.bundle as _bundle_mod  # noqa: E402
+    import calx.db as _db  # noqa: E402
     _HAS_DB = True
 except ImportError:
     _HAS_DB = False
@@ -201,7 +203,7 @@ def bundle_verify(bundle_json: str, offline: bool = False) -> dict[str, Any]:
         chain_results = verify_chain(bundle_obj)
 
         claims_out = []
-        for pr, kr, cr in zip(probe_results, kernel_results, chain_results):
+        for pr, kr, cr in zip(probe_results, kernel_results, chain_results, strict=True):
             claims_out.append({
                 "claim_id": pr.claim_id,
                 "statement": pr.statement,
