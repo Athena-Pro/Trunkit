@@ -23,9 +23,10 @@ import psycopg
 PG_DSN = os.environ.get(
     "CALX_DSN", "postgresql://trunk:trunk@localhost:5434/trunk"
 )
-LITHON_CORE = Path("p-sack/src")
-sys.path.insert(0, str(LITHON_CORE))
-from core.p_sack import (  # noqa: E402
+# The lithon valuation core (pack/val) is vendored alongside this script as
+# lithon_core.py -- no external p-Sack checkout required.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lithon_core import (  # noqa: E402
     BASES, state_from_integer, phi, MAX_VALUE,
 )
 
