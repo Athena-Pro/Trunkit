@@ -47,6 +47,14 @@ Users*/
 
 .pr_body.md
 
+# p-adic tree (calx + lithon) -- local-only project, do not push
+padic_tree/
+
+# Local-only research scratch (kernels + specs/results, not part of the package)
+chess-carry/
+ladder-encoder/
+rhyme-discovery/
+
 # Loom layer (bespoke arithmetic of orthogonal F_1 axes) -- local, untracked
 docs/LOOM_ORTHOGONAL_F1.md
 local/sql/97_kan_loom.sql
