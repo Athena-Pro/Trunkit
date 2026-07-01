@@ -47,6 +47,9 @@ binary = [
 image = [
   "pillow>=10",
 ]
+mcp = [
+  "mcp>=1.0.0",
+]
 dev = [
   "psycopg[binary]>=3.2,<4",
   "pytest>=8",
@@ -54,14 +57,16 @@ dev = [
   "ruff>=0.6",
   "build>=1.0",
   "twine>=5.0",
+  "mcp>=1.0.0",
 ]
 
 [project.scripts]
-trunkit = "calx.cli:main"
-nerode  = "nerode.cli:main"
+trunkit     = "calx.cli:main"
+nerode      = "nerode.cli:main"
+trunkit-mcp = "trunkit_mcp.server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/calx", "src/nerode"]
+packages = ["src/calx", "src/nerode", "src/trunkit_mcp"]
 
 [tool.hatch.build.targets.wheel.shared-data]
 "tools" = "share/trunkit/tools"
