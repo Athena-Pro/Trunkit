@@ -61,7 +61,22 @@ CREATE OR REPLACE VIEW kan.shadow_laws AS
 SELECT (SELECT count(*) FROM kan.shadow_separation)                   AS tested_pairs,
        (SELECT count(*) FROM kan.shadow_separation
           WHERE combined_equal)                                       AS collided_pairs,
-       (SELECT bool_and(resolves) FROM kan.shadow_separation
-          WHERE combined_equal)                                       AS shadow_resolves_kernel,
+       -- "the shadow resolves every residual combined-invariant collision."
+       -- Three cases, kept distinct (see 79_cert_kan_engines.sql discipline):
+       --   * shadow never computed (no in-window terms) -> NULL (unknown).
+       --   * computed, some collisions -> bool_and(resolves): FALSE if the
+       --     shadow fails to separate any of them (a genuine refutation).
+       --   * computed, ZERO collisions -> vacuously TRUE (the multiplicative
+       --     tower already separated the corpus; nothing left to resolve).
+       -- Only the last case changes: bool_and over the empty set is NULL, but
+       -- with the shadow actually computed that is a vacuous truth, not an
+       -- unknown -- consistent with how the other engines score empty strata.
+       CASE WHEN (SELECT count(*) FROM kan.shadow_term WHERE in_window) = 0
+            THEN NULL
+            ELSE COALESCE(
+                   (SELECT bool_and(resolves) FROM kan.shadow_separation
+                     WHERE combined_equal),
+                   TRUE)
+       END                                                            AS shadow_resolves_kernel,
        (SELECT count(DISTINCT seq) FROM kan.shadow_term
           WHERE in_window)                                            AS seqs_with_window;
