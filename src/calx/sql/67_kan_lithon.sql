@@ -29,7 +29,9 @@
 --                      Spec(Z); it is the same gluing the identity-
 --                      decomposition capstone required (W_0).
 --
--- Proved input-independently by proofs/lithon.py. Idempotent.
+-- Verified by local/tools/build_lithon.py, which recomputes pack/val from the
+-- vendored valuation core (local/tools/lithon_core.py) over the corpus and
+-- populates kan.lithon_witness. Idempotent.
 
 CREATE TABLE IF NOT EXISTS kan.lithon (
     structure        TEXT PRIMARY KEY,       -- 'lithon_F1_SpecZ'
