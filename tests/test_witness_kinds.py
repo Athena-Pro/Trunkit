@@ -26,6 +26,7 @@ AUTHORITIES = (
 EXPECTED_KINDS = {
     "term", "trace", "counterexample", "hash_chain", "kan_diagram",
     "arith_constraint", "snark_proof",
+    "quote_span",
     "construction_record", "computation_trace",
     "nerode_partition", "bisimulation", "state_map",
     "betti",

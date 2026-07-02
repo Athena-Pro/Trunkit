@@ -120,7 +120,9 @@ def kernel_verify(witness_json: str) -> dict[str, Any]:
 
     Pass the JSON string of a witness body (the ``body`` field from a
     cert.export_bundle entry). Supported schemas: factorization, crt,
-    unit_fraction, matrix_word, dfa_betti, knot_alexander.
+    unit_fraction, matrix_word, dfa_betti, knot_alexander, plus the
+    universal method kernels arith_check, quote_carry, csp_carry,
+    puzzle_parity (METHODS.md).
 
     Returns verdict ("valid" | "refuted" | "unverified") and evidence dict.
     No database required.
