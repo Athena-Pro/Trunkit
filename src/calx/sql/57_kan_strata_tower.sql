@@ -55,7 +55,15 @@ bottom AS (
          (SELECT array_agg(term ORDER BY idx) FROM kan.sequence_terms
            WHERE seq_id=p.tgt_object)
 )
-SELECT (SELECT bad FROM idem)   = 0 AS idempotent,
-       (SELECT bad FROM ortho)  = 0 AS orthogonal,
-       (SELECT bad FROM bottom) = 0 AS bottom_rung,
+-- Each law is a no-bad-rows check, so it must read NULL (unknown) when the
+-- population it quantifies over is absent -- an engine that never ran is not
+-- vacuously lawful (99_cert_vacuity discipline, cf. 36c0d04 / a725a7b).
+SELECT CASE WHEN (SELECT count(*) FROM kan.functor_object_map
+                   WHERE functor LIKE 'strata\_%' ESCAPE '\') = 0 THEN NULL
+            ELSE (SELECT bad FROM idem) = 0 END   AS idempotent,
+       CASE WHEN (SELECT count(*) FROM kan.strata_tower) = 0 THEN NULL
+            ELSE (SELECT bad FROM ortho) = 0 END  AS orthogonal,
+       CASE WHEN (SELECT count(*) FROM kan.functor_object_map
+                   WHERE functor = 'strata_W1') = 0 THEN NULL
+            ELSE (SELECT bad FROM bottom) = 0 END AS bottom_rung,
        (SELECT count(DISTINCT functor) FROM kan.strata_tower) AS rung_functors;
