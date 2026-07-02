@@ -184,7 +184,7 @@ trunkit close [--write]
 
 trunkit witness <claim_id> --kind KIND --body JSON [--write]
 # Attach a structured proof witness to a claim.
-# KIND: term | trace | counterexample | hash_chain | kan_diagram
+# KIND: term | trace | counterexample | hash_chain | kan_diagram | quote_span
 
 trunkit register-lean <claim_id> --root DIR --decl Module.thm [--write]
 # Register a Lean (Lake) project + declaration as a formal_external artifact.

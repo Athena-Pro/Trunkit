@@ -420,6 +420,27 @@ def check_knot_alexander(w: dict[str, Any]) -> tuple[bool | None, dict[str, Any]
         return None, {"error": f"{type(exc).__name__}: {exc}"}
 
 
+def _method_kernels() -> dict[str, Any]:
+    # Universal method kernels (calx.methods — stdlib-only, same charter).
+    # Imported lazily so a stripped-down deployment of this single module can
+    # still check the six built-in schemas above.
+    try:
+        from calx.methods import (
+            check_arith_check,
+            check_csp_carry,
+            check_puzzle_parity,
+            check_quote_carry,
+        )
+    except ImportError:
+        return {}
+    return {
+        "arith_check": check_arith_check,
+        "quote_carry": check_quote_carry,
+        "csp_carry": check_csp_carry,
+        "puzzle_parity": check_puzzle_parity,
+    }
+
+
 _KERNELS = {
     "factorization": check_factorization,
     "crt": check_crt,
@@ -427,6 +448,7 @@ _KERNELS = {
     "matrix_word": check_matrix_word,
     "dfa_betti": check_dfa_betti,
     "knot_alexander": check_knot_alexander,
+    **_method_kernels(),
 }
 
 

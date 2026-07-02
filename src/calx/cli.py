@@ -503,7 +503,8 @@ def build_parser() -> argparse.ArgumentParser:
     wi = sub.add_parser("witness", help="attach a structured proof witness to a claim")
     wi.add_argument("claim_id", type=int)
     wi.add_argument("--kind", required=True,
-                    choices=["term", "trace", "counterexample", "hash_chain", "kan_diagram"])
+                    choices=["term", "trace", "counterexample", "hash_chain",
+                             "kan_diagram", "quote_span"])
     wi.add_argument("--body", required=True, help="witness body as JSON string")
     wi.add_argument("--write", action="store_true", help="record the witness (dry-run without)")
     wi.set_defaults(func=_cmd_witness)

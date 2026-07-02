@@ -73,6 +73,8 @@ BEGIN
             'term', 'trace', 'counterexample', 'hash_chain', 'kan_diagram',
             -- crypto tier (calx 97_cert_crypto.sql)
             'arith_constraint', 'snark_proof',
+            -- universal method kernels (calx.methods; METHODS.md)
+            'quote_span',
             -- Nerode automata bridge
             'construction_record', 'computation_trace',
             'nerode_partition', 'bisimulation', 'state_map',
