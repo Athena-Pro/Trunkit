@@ -47,28 +47,9 @@
 --    homomorphism  general
 -- =============================================================================
 
--- ---------------------------------------------------------------------------
--- Extend the cert.witness kind constraint to include 'state_map'.
--- Same idempotent pattern as 00_bootstrap.sql.
--- ---------------------------------------------------------------------------
-DO $$
-BEGIN
-    ALTER TABLE cert.witness DROP CONSTRAINT IF EXISTS cert_witness_kind_check;
-    ALTER TABLE cert.witness DROP CONSTRAINT IF EXISTS witness_kind_check;
-    ALTER TABLE cert.witness
-        ADD CONSTRAINT cert_witness_kind_check CHECK (kind IN (
-            -- Trunkit kinds
-            'term', 'trace', 'counterexample', 'hash_chain', 'kan_diagram',
-            -- Nerode kinds
-            'construction_record', 'computation_trace',
-            'nerode_partition', 'bisimulation',
-            -- Morphism kind (Phase 1d)
-            'state_map'
-        ));
-EXCEPTION WHEN OTHERS THEN
-    NULL;
-END;
-$$;
+-- The 'state_map' witness kind this layer writes is part of the canonical
+-- cert_witness_kind_check vocabulary owned by 00_bootstrap.sql (applied
+-- earlier in the same pass). Do not drop/re-add the constraint here.
 
 -- ---------------------------------------------------------------------------
 -- Register cert method for morphisms.
