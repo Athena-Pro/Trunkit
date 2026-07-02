@@ -50,9 +50,16 @@ SELECT structure, is_bigraded,
   FROM kan.bigrading;
 
 -- The support lives on the incidence poset i<=j (triangularity witness).
+-- support_triangular quantifies over occupied cells; with no support rows the
+-- engine never ran, so it reads NULL (unknown), not a vacuous TRUE
+-- (99_cert_vacuity discipline, cf. 36c0d04 / a725a7b).
 CREATE OR REPLACE VIEW kan.bigrading_triangular AS
-SELECT (SELECT count(*) FROM kan.bigrading_support WHERE i_omega > j_bigomega
-          AND NOT (i_omega = 0 AND j_bigomega = 0)) = 0  AS support_triangular,
+SELECT CASE WHEN (SELECT count(*) FROM kan.bigrading_support) = 0
+            THEN NULL
+            ELSE (SELECT count(*) FROM kan.bigrading_support
+                   WHERE i_omega > j_bigomega
+                     AND NOT (i_omega = 0 AND j_bigomega = 0)) = 0
+       END                                                AS support_triangular,
        (SELECT count(*) FROM kan.bigrading_support)       AS occupied_strata,
        (SELECT count(DISTINCT seq) FROM kan.bigrading_support) AS sequences;
 

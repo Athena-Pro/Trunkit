@@ -38,17 +38,26 @@ SELECT m.src_object AS seq
 --   total      : every 'seq' object has an image
 --   idempotent : every image object maps to itself
 --   well_typed : (checked by the cert; recorded here as the image set)
+-- Both laws are no-bad-rows checks; with no prime_members functor rows the
+-- engine never ran, so they read NULL (unknown), not a vacuous TRUE
+-- (99_cert_vacuity discipline, cf. 36c0d04 / a725a7b).
 CREATE OR REPLACE VIEW kan.prime_members_laws AS
 SELECT
-  (SELECT count(*) FROM kan.object o
-     WHERE o.category = 'seq'
-       AND NOT EXISTS (SELECT 1 FROM kan.functor_object_map m
-                        WHERE m.functor = 'prime_members'
-                          AND m.src_object = o.name)) = 0          AS total,
-  (SELECT count(*) FROM kan.functor_object_map m
-     WHERE m.functor = 'prime_members'
-       AND m.src_object LIKE 'PM\_%' ESCAPE '\'
-       AND m.src_object <> m.tgt_object) = 0                       AS idempotent,
+  CASE WHEN (SELECT count(*) FROM kan.functor_object_map
+              WHERE functor = 'prime_members') = 0 THEN NULL
+       ELSE (SELECT count(*) FROM kan.object o
+              WHERE o.category = 'seq'
+                AND NOT EXISTS (SELECT 1 FROM kan.functor_object_map m
+                                 WHERE m.functor = 'prime_members'
+                                   AND m.src_object = o.name)) = 0
+  END                                                              AS total,
+  CASE WHEN (SELECT count(*) FROM kan.functor_object_map
+              WHERE functor = 'prime_members') = 0 THEN NULL
+       ELSE (SELECT count(*) FROM kan.functor_object_map m
+              WHERE m.functor = 'prime_members'
+                AND m.src_object LIKE 'PM\_%' ESCAPE '\'
+                AND m.src_object <> m.tgt_object) = 0
+  END                                                              AS idempotent,
   (SELECT count(*) FROM kan.functor_object_map
      WHERE functor = 'prime_members')                              AS object_map_size,
   (SELECT count(*) FROM kan.prime_members_fixed)                   AS fixed_points;
