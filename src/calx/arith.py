@@ -43,6 +43,7 @@ __all__ = [
     "evaluate", "residual", "verdict",
     "prime_basis", "modular_certify", "unit_mod", "soundness_error_primes",
     "bundle_admits",
+    "NODE_REGISTRY", "phi_from_json", "interp_from_json",
 ]
 
 
@@ -356,3 +357,62 @@ def bundle_admits(claims):
                 viol.append(("I2 classification-conflict", sym,
                              private_syms[sym], c["name"]))
     return (len(viol) == 0), viol
+
+
+# --------------------------------------------------------------------------- #
+# JSON codec for the phi AST — the portable form an agent (or the trunkit-mcp
+# arith_verify tool) submits. A node is {"op": <constructor>, "args": [...]};
+# each arg is either a nested node (a dict) or a scalar passed through as-is.
+# Decoding uses a fixed constructor allowlist — no eval, safe on untrusted
+# input. Interp travels as its plain matrices dict: {"C": [[...], ...]}.
+# --------------------------------------------------------------------------- #
+NODE_REGISTRY = {
+    f.__name__: f
+    for f in (
+        Var, Const, Add, Mul, Sub, Lookup, Len,
+        Eq, And, Or, Lt, Gt, Forall,
+        Not, Neq, Implies, Exists, Bool, LeqZ, Divides,
+    )
+}
+
+
+def phi_from_json(obj):
+    """Decode {"op": ..., "args": [...]} (already-parsed JSON) into a phi AST.
+
+    Raises ValueError on unknown ops or malformed nodes so callers can map the
+    failure to an honest 'unverified', never a guess.
+    """
+    if not isinstance(obj, dict) or "op" not in obj:
+        raise ValueError(f"not a phi node: {obj!r}")
+    ctor = NODE_REGISTRY.get(obj["op"])
+    if ctor is None:
+        raise ValueError(f"unknown op {obj['op']!r}")
+    args = obj.get("args", [])
+    if not isinstance(args, list):
+        raise ValueError(f"args must be a list, got {type(args).__name__}")
+    decoded = [phi_from_json(a) if isinstance(a, dict) else a for a in args]
+    try:
+        return ctor(*decoded)
+    except TypeError as exc:
+        raise ValueError(f"bad arity for {obj['op']}: {exc}") from exc
+
+
+def interp_from_json(obj) -> Interp:
+    """Decode {"C": [[int, ...], ...], ...} into an Interp (integer matrices)."""
+    if not isinstance(obj, dict):
+        raise ValueError("interpretation must be an object of symbol -> matrix")
+    matrices: dict[str, list[list[int]]] = {}
+    for name, mat in obj.items():
+        if (
+            not isinstance(mat, list) or not mat
+            or not all(isinstance(row, list) and row for row in mat)
+            or not all(isinstance(v, int) and not isinstance(v, bool)
+                       for row in mat for v in row)
+        ):
+            raise ValueError(f"matrix for {name!r} must be a non-empty list "
+                             "of non-empty integer rows")
+        widths = {len(row) for row in mat}
+        if len(widths) != 1:
+            raise ValueError(f"matrix for {name!r} has ragged rows")
+        matrices[name] = mat
+    return Interp(matrices)
