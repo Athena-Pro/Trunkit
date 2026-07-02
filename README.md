@@ -45,7 +45,7 @@ Just PostgreSQL, Python, and ~1.5 MB of schemas.
 | **calx** | Dense prime factorisation of ℤ[1..N]; aliquot/derivative dynamics; CRT; OEIS exact + **cosine-candidate** matching; **C-finite/P-finite recurrence certificates** |
 | **curry** | Immutable versioned constants and functions; append-only computational provenance |
 | **kan** | Category-*structured* meta-layer: reflects Postgres FK graphs into objects/morphisms and checks **structural invariants** (triangle commutativity, product universal property, naturality, epi classification) as re-runnable probes — see the caveat below |
-| **cert** | Proof-carrying attestation: five method tiers, structured witness storage, proof composition DAG, portable bundle export, consumer re-verification; **exact-domain shield**, **recurrence/morphism certificates**, **holographic (Merkle) commitments**, **image anchoring** |
+| **cert** | Proof-carrying attestation: six method tiers, structured witness storage, proof composition DAG, portable bundle export, consumer re-verification; **exact-domain shield**, **recurrence/morphism certificates**, **holographic (Merkle) commitments**, **image anchoring**, **crypto-succinct (arithmetised) claims** |
 | **Nerode** | DFA/automata engine on PostgreSQL: construction, minimization, product, session DFAs, sequence cache, certified handoff envelopes |
 | **Porter** | Agent context handoff: pre-pack external data, certify session boundaries, hand verified context to a new model with zero tool calls |
 
@@ -266,6 +266,7 @@ conn.execute(
 | `formal_external` | SHA256-pinned external artifact | Python/Lean/Agda proof scripts |
 | `empirical_corpus` | Provenance only | Corpus document assertions |
 | `witness_carry` | In-DB witness term | Structured proof terms stored alongside certificates; consumer-replayable |
+| `crypto_succinct` | Pinned verifying key + external verifier | Succinct (optionally zero-knowledge) proofs over arithmetised first-order claims (`calx.arith`); the prover stays outside the package |
 
 > **Exactness shield.** Every claim also carries a `domain` tag (`exact_int` /
 > `rational` / `algebraic` / `interval` / `float_heuristic`). A ledger trigger
@@ -302,11 +303,12 @@ Beyond integer-fact and categorical claims, cert ships re-checkable, **exact** c
 
 | Component | Files | Size |
 |-----------|-------|------|
-| SQL (calx 00–96 + nerode 00–C0) | ~118 | ~704 KB |
-| Python tools | 47 | ~393 KB |
-| Proof scripts | 4 | ~23 KB |
-| Src + tests + config | ~69 | ~558 KB |
-| **Total (no virtualenv)** | **~219** | **~1.5 MB** |
+| SQL (calx 00–98 + nerode 00–C0) | ~117 | ~711 KB |
+| Python packages (`src/`: calx + nerode + trunkit_mcp) | ~25 | ~183 KB |
+| Python tools | ~17 | ~188 KB |
+| Proof scripts | 6 | ~42 KB |
+| Tests | ~45 | ~296 KB |
+| **Total (no virtualenv)** | **~210** | **~1.4 MB** |
 
 For scale only (not a capability comparison): a Lean 4 toolchain is ≈ 2.9 GB
 per version and a compiled Mathlib ≈ 4–10 GB per project. **Trunkit is not a
@@ -332,6 +334,8 @@ src/
     sources.py    — WeatherSource, TickerSource, HNSource, TickerHistorySource
     adapters.py   — HttpSource, CallableSource, resolve(), with_retry()
     db.py         — connection utilities + SCHEMA_FILES list
+  trunkit_mcp/ — MCP server (`trunkit-mcp`): consumer verify/export tools always
+                on; prover tools gated behind TRUNKIT_ALLOW_WRITE=1
 scripts/
   morning_brief_demo.py   — end-to-end Porter demo
 tests/

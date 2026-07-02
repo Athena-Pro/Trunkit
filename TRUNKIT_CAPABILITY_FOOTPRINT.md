@@ -3,7 +3,17 @@
 *Prepared 2026-06-21. Sizes are **source-text KB** (SQL + Python), measured from the current tree, rounded — they gauge relative weight and overlap, not installed/compiled size. The only external runtime dependency is **`psycopg`** (shared by every module; never duplicated).*
 
 ## PyPI status (live)
-`pip install trunkit` → **0.3.0** ([pypi.org/project/trunkit/0.3.0](https://pypi.org/project/trunkit/0.3.0/)), verified to resolve from PyPI. This release **ships the full expansion** — Lean bridge, vision, OEIS cosine, and the Nerode A·B·C quantitative/policy layers — and the wheel was confirmed to contain `41a`/`91`/`92`, `leanbridge.py`, `imagefeatures.py`, and `tools/lean_check.sh`, with the local-only `97`/`98` correctly absent. Core stays `psycopg`-only; `[image]` (Pillow) is an optional extra.
+`pip install trunkit` → **0.3.0** ([pypi.org/project/trunkit/0.3.0](https://pypi.org/project/trunkit/0.3.0/)), verified to resolve from PyPI. This release **ships the full expansion** — Lean bridge, vision, OEIS cosine, and the Nerode A·B·C quantitative/policy layers — and the wheel was confirmed to contain `41a`/`91`/`92`, `leanbridge.py`, `imagefeatures.py`, and `tools/lean_check.sh`, with the local-only loom files (`local/sql/97_kan_loom.sql`–`99_loom_lift.sql`) correctly absent. Core stays `psycopg`-only; `[image]` (Pillow) is an optional extra.
+
+> **Numbering caveat (added 2026-07-01).** The 0.3.0 wheel check above said "97/98
+> correctly absent" — at that time those numbers named the *local-only* loom files.
+> The core schema has since grown its **own** `97_cert_crypto.sql` and
+> `98_kan_scott.sql`, which **do** ship in the wheel. Any re-run of the packaging
+> audit must check for the absence of the loom files *by name*, not by number.
+> Post-0.3.0 additions not yet reflected in the tables below: crypto-succinct cert
+> tier + `calx.arith`, the `trunkit_mcp` server package, universal verification
+> method kernels (METHODS.md), the Fourier radial-ring descriptor, vendored
+> `lithon_core`, and the Scott/domain-theory kan engine.
 
 ## Capability checklist
 
