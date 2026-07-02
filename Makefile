@@ -13,8 +13,9 @@ down:
 	docker compose down
 
 ## Apply Trunkit (calx/kan/curry/cert) schemas — idempotent
+## LC_ALL=C sort -n: numeric prefix order (99_ < 100_), matching calx.db.schema_order
 apply-trunkit:
-	@for f in $$(ls src/calx/sql/*.sql | sort); do \
+	@for f in $$(ls src/calx/sql/*.sql | LC_ALL=C sort -n); do \
 		echo "  $$f"; \
 		psql "$(TRUNK_DSN)" -f "$$f" -q; \
 	done

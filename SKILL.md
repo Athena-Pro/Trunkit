@@ -46,8 +46,8 @@ trunkit witness 7 --kind trace \
 ## Bootstrap
 
 ```bash
-# Apply all schemas (idempotent)
-for f in sql/*.sql; do psql $TRUNK_DSN -f "$f"; done
+# Apply all schemas (idempotent; numeric prefix order — 99_ before 100_)
+for f in $(ls sql/*.sql | LC_ALL=C sort -n); do psql $TRUNK_DSN -f "$f"; done
 
 # Populate integers, sync categories, run reflexive closure
 python tools/kan_in_kan.py
