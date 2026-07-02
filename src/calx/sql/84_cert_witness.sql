@@ -5,13 +5,40 @@
 CREATE TABLE IF NOT EXISTS cert.witness (
     id             BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     certificate_id BIGINT NOT NULL REFERENCES cert.certificate(id) ON DELETE CASCADE,
-    kind           TEXT   NOT NULL CHECK (kind IN ('term','trace','counterexample','hash_chain','kan_diagram')),
+    kind           TEXT   NOT NULL,
     body           JSONB  NOT NULL,
     schema_version JSONB  NOT NULL DEFAULT '{}'::jsonb,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS cert_witness_certificate_id_idx ON cert.witness (certificate_id);
+
+-- THE canonical witness-kind vocabulary, for every writer in the stack.
+-- This block is the single calx-side authority for the constraint; nerode's
+-- 00_bootstrap.sql carries the identical list for Nerode-only databases, and
+-- tests/test_witness_kinds.py asserts the two never drift apart. Do NOT
+-- drop/re-add this constraint anywhere else (that pattern previously left five
+-- files fighting over it with five different lists, and any populated ledger
+-- refused the next schema apply).
+-- Idempotent superset replace; drops the legacy auto-generated name too.
+DO $$
+BEGIN
+    ALTER TABLE cert.witness DROP CONSTRAINT IF EXISTS witness_kind_check;
+    ALTER TABLE cert.witness DROP CONSTRAINT IF EXISTS cert_witness_kind_check;
+    ALTER TABLE cert.witness
+        ADD CONSTRAINT cert_witness_kind_check CHECK (kind IN (
+            -- cert core
+            'term', 'trace', 'counterexample', 'hash_chain', 'kan_diagram',
+            -- crypto tier (97_cert_crypto.sql)
+            'arith_constraint', 'snark_proof',
+            -- Nerode automata bridge
+            'construction_record', 'computation_trace',
+            'nerode_partition', 'bisimulation', 'state_map',
+            -- topological bridge (nerode 98_topological_signature.sql)
+            'betti'
+        ));
+END;
+$$;
 
 COMMENT ON TABLE cert.witness IS
     'Structured proof witnesses attached to certificates. '

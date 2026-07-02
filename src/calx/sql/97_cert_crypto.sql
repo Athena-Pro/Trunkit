@@ -27,13 +27,10 @@ INSERT INTO cert.method (name, claim_kind, checker_kind, description) VALUES
      'without trusting the agent or re-executing. Witness w may stay private (ZK).')
 ON CONFLICT (name) DO NOTHING;
 
--- Allow the new structured witness kinds (the interpretation `s` / arith relation,
--- and the opaque succinct proof) alongside the existing kinds.
-ALTER TABLE cert.witness DROP CONSTRAINT IF EXISTS witness_kind_check;
-ALTER TABLE cert.witness ADD CONSTRAINT witness_kind_check
-    CHECK (kind IN ('term','trace','counterexample','hash_chain','kan_diagram',
-                    'arith_constraint',  -- the interpretation s + relation R_phi
-                    'snark_proof'));     -- the succinct proof pi (opaque blob)
+-- The witness kinds this tier writes ('arith_constraint', 'snark_proof') are
+-- part of the canonical cert_witness_kind_check vocabulary owned by
+-- 84_cert_witness.sql (applied earlier in the same pass). Do not drop/re-add
+-- the constraint here.
 
 -- ---- 2. The Cert tuple (Sec 4): (policyID, action, pub, vk, paramsHash, pi) --
 -- Mirrors cert.artifact for the formal tier, but pins crypto parameters instead

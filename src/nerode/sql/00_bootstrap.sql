@@ -57,28 +57,28 @@ CREATE INDEX IF NOT EXISTS idx_cert_certificate_claim
 CREATE INDEX IF NOT EXISTS cert_witness_certificate_id_idx
     ON cert.witness (certificate_id);
 
--- Extend kind constraint to cover both Trunkit and Nerode witness kinds.
--- Idempotent: drops any existing kind check, then re-adds the full superset.
--- Safe on a fresh Nerode-only DB (no existing constraint → adds one).
--- Safe on a Trunkit-shared DB (replaces Trunkit-only constraint with superset).
+-- THE canonical witness-kind vocabulary — the Nerode-side mirror of the
+-- identical block in Trunkit's 84_cert_witness.sql (tests/test_witness_kinds.py
+-- asserts the two lists never drift). Covers BOTH stacks so the constraint is
+-- correct on a Nerode-only DB and a no-op-equivalent on a co-located one.
+-- Do NOT drop/re-add this constraint in any later schema file.
+-- Idempotent superset replace; drops the legacy auto-generated name too.
 DO $$
 BEGIN
-    -- Drop under both the explicit name and the PostgreSQL auto-generated name
-    -- (Trunkit's 84_cert_witness.sql creates the inline column CHECK whose
-    -- auto-generated name is 'witness_kind_check'; we replace it with our
-    -- explicitly-named unified constraint so both names are cleaned up.)
     ALTER TABLE cert.witness DROP CONSTRAINT IF EXISTS witness_kind_check;
     ALTER TABLE cert.witness DROP CONSTRAINT IF EXISTS cert_witness_kind_check;
     ALTER TABLE cert.witness
         ADD CONSTRAINT cert_witness_kind_check CHECK (kind IN (
-            -- Trunkit kinds
+            -- cert core
             'term', 'trace', 'counterexample', 'hash_chain', 'kan_diagram',
-            -- Nerode kinds
+            -- crypto tier (calx 97_cert_crypto.sql)
+            'arith_constraint', 'snark_proof',
+            -- Nerode automata bridge
             'construction_record', 'computation_trace',
-            'nerode_partition', 'bisimulation'
+            'nerode_partition', 'bisimulation', 'state_map',
+            -- topological bridge (98_topological_signature.sql)
+            'betti'
         ));
-EXCEPTION WHEN OTHERS THEN
-    NULL;  -- cert.witness may not yet exist; CREATE TABLE above handles that
 END;
 $$;
 

@@ -39,28 +39,9 @@ INSERT INTO cert.method (name, claim_kind, checker_kind, description) VALUES
      'cert_kernel dfa_betti schema. Witness kind = betti.')
 ON CONFLICT (name) DO NOTHING;
 
--- ---------------------------------------------------------------------------
--- Extend the cert.witness kind constraint to include 'betti'.
--- Idempotent superset replace (same pattern as 00_bootstrap / 70_morphism).
--- ---------------------------------------------------------------------------
-DO $$
-BEGIN
-    ALTER TABLE cert.witness DROP CONSTRAINT IF EXISTS witness_kind_check;
-    ALTER TABLE cert.witness DROP CONSTRAINT IF EXISTS cert_witness_kind_check;
-    ALTER TABLE cert.witness
-        ADD CONSTRAINT cert_witness_kind_check CHECK (kind IN (
-            -- Trunkit kinds
-            'term', 'trace', 'counterexample', 'hash_chain', 'kan_diagram',
-            -- Nerode kinds
-            'construction_record', 'computation_trace',
-            'nerode_partition', 'bisimulation', 'state_map',
-            -- topological bridge
-            'betti'
-        ));
-EXCEPTION WHEN OTHERS THEN
-    NULL;
-END;
-$$;
+-- The 'betti' witness kind this layer writes is part of the canonical
+-- cert_witness_kind_check vocabulary owned by 00_bootstrap.sql (applied
+-- earlier in the same pass). Do not drop/re-add the constraint here.
 
 -- ---------------------------------------------------------------------------
 -- nerode.dfa_edge_list(automaton_id) -> JSONB array of [from_state, to_state]
