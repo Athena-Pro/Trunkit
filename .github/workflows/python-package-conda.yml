@@ -58,7 +58,8 @@ jobs:
         env:
           PGPASSWORD: trunk
         run: |
-          for f in $(ls src/calx/sql/*.sql | sort); do
+          # LC_ALL=C sort -n: numeric prefix order (99_ < 100_), matching calx.db.schema_order
+          for f in $(ls src/calx/sql/*.sql | LC_ALL=C sort -n); do
             psql -h localhost -p 5434 -U trunk -d trunk -f "$f" -q
           done
 

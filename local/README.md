@@ -44,6 +44,9 @@ trunkit init --local
 
 ## Adding your own extensions
 
-Drop SQL files into `local/sql/` (named `NN_description.sql`) and run
-`trunkit init --local` to apply them.  Tools go in `local/tools/` and are
-invoked directly with `python local/tools/your_tool.py`.
+Drop SQL files into `local/sql/` (named `NN_description.sql` or
+`NNN_description.sql`) and run `trunkit init --local` to apply them.
+Files apply in **numeric prefix order** (`99_` before `100_`; letter
+suffixes like `41a_` sort after their base number), not raw filename
+order.  Tools go in `local/tools/` and are invoked directly with
+`python local/tools/your_tool.py`.

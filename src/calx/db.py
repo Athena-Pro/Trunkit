@@ -25,14 +25,34 @@ from psycopg import Connection
 SQL_DIR = importlib.resources.files("calx") / "sql"
 
 
+def schema_order(name: str) -> tuple[int, str]:
+    """Numeric-aware apply order for ``NN_``/``NNN_`` schema filenames.
+
+    Plain lexical sort breaks at the 2->3 digit boundary ('100_...' would
+    apply before '10_curry.sql'). Ordering by (numeric prefix, remainder)
+    keeps '41_' < '41a_' < '42_' and '99_' < '100_'. The Makefile / CI apply
+    loops encode the same order as ``LC_ALL=C sort -n``.
+    """
+    digits = ""
+    for ch in name:
+        if not ch.isdigit():
+            break
+        digits += ch
+    return (int(digits), name[len(digits):])
+
+
+def is_numbered_sql(name: str) -> bool:
+    """A schema file: '.sql' with a 2+ digit numeric prefix (NN_ / NNN_)."""
+    return name.endswith(".sql") and len(name) >= 3 and name[:2].isdigit()
+
+
 def _numbered_sql_files() -> tuple[str, ...]:
     return tuple(
         entry.name
-        for entry in sorted(SQL_DIR.iterdir(), key=lambda path: path.name)
-        if entry.is_file()
-        and entry.suffix == ".sql"
-        and len(entry.name) >= 3
-        and entry.name[:2].isdigit()
+        for entry in sorted(
+            (e for e in SQL_DIR.iterdir() if e.is_file() and is_numbered_sql(e.name)),
+            key=lambda e: schema_order(e.name),
+        )
     )
 
 # calx-only DDL (unqualified names; resolve to the `calx` schema via search_path)
@@ -100,11 +120,12 @@ def apply_schema(conn: Connection, files: tuple[str, ...] = SCHEMA_FILES) -> Non
 
 
 def apply_extensions(conn: Connection, ext_dir: str | os.PathLike) -> list[str]:
-    """Apply numbered SQL files from *ext_dir* (e.g. ``local/sql/``) in filename order.
+    """Apply numbered SQL files from *ext_dir* (e.g. ``local/sql/``) in numeric order.
 
-    Only files whose names begin with two digits (``NN_*.sql``) are loaded —
-    the same convention as the core schema files.  Files are applied inside a
-    single transaction so a failure rolls back the whole extension batch.
+    Only files whose names begin with a 2+ digit numeric prefix (``NN_*.sql``
+    or ``NNN_*.sql``) are loaded — the same convention and the same
+    ``schema_order`` ordering as the core schema files.  Files are applied
+    inside a single transaction so a failure rolls back the whole batch.
 
     Returns the list of filenames actually executed (useful for diagnostics).
     """
@@ -112,9 +133,8 @@ def apply_extensions(conn: Connection, ext_dir: str | os.PathLike) -> list[str]:
 
     ext_path = pathlib.Path(ext_dir)
     sql_files = sorted(
-        p for p in ext_path.iterdir()
-        if p.is_file() and p.suffix == ".sql"
-        and len(p.name) >= 3 and p.name[:2].isdigit()
+        (p for p in ext_path.iterdir() if p.is_file() and is_numbered_sql(p.name)),
+        key=lambda p: schema_order(p.name),
     )
     if not sql_files:
         return []
