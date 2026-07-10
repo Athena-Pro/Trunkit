@@ -82,7 +82,7 @@ VEX — see Phase 2). Scope: fix-if/when-sensitive.
 |---|---|---|
 | CWE-915 mutable history | append-only `BEFORE UPDATE/DELETE` triggers | step 95 ([`95_cert_ledger.sql`](src/calx/sql/95_cert_ledger.sql)) |
 | CWE-20 improper input validation | three-valued "malformed → `unverified`", never a fake verdict | every `cert.kernel_*` ([`94_cert_kernel.sql`](src/calx/sql/94_cert_kernel.sql), [`calx/kernel.py`](src/calx/kernel.py)) |
-| CWE-754 improper check of unusual conditions | empty engine → `unverified` not `refuted`; LEFT JOIN surfaces never-checked claims | steps 40/79 (audited in [`AUDIT.md`](AUDIT.md) §3) |
+| CWE-754 improper check of unusual conditions | empty engine → `unverified` not `refuted`; LEFT JOIN surfaces never-checked claims | steps 40/79 (audited in [`AUDIT.md`](docs/reports/AUDIT.md) §3) |
 
 ---
 
@@ -158,7 +158,7 @@ T" evidence. Aligns Trunkit with SLSA / in-toto / Sigstore supply-chain norms.
 - [x] `SECURITY.md` — this document (threat model + CWE register + designs A/B).
 - [ ] Probe-sandbox implementation (design A) — **not started; needs a live DB to test.**
 - [ ] Ledger-signature + anchor cadence (design B) — **not started.**
-- [ ] `AUDIT.md` §10 "Adversarial / CWE" — tamper tests:
+- [ ] `docs/reports/AUDIT.md` §10 "Adversarial / CWE" — tamper tests:
       forge a chain → must fail signature (B1);
       malicious probe (`pg_read_file`) → must be sandboxed/denied (A);
       substitute a whole chain → must fail external anchor (B2).

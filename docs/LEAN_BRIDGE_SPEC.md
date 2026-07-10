@@ -1,6 +1,6 @@
 # T1 — Lean verification bridge: implementation spec
 
-*Prepared 2026-06-20; shipped in `trunkit` 0.3.0. Targets the cert pillar. Companion to `Trunkit_Erdos_AI_Capability_Fit.md` (item T1). Grounds: `src/calx/sql/40_cert.sql`, `41_cert_formal.sql`, `tools/cert_formal.py`, `src/calx/cli.py`.*
+*Prepared 2026-06-20; shipped in `trunkit` 0.3.0. Targets the cert pillar. Companion to `docs/reports/Trunkit_Erdos_AI_Capability_Fit.md` (item T1). Grounds: `src/calx/sql/40_cert.sql`, `41_cert_formal.sql`, `tools/cert_formal.py`, `src/calx/cli.py`.*
 
 ---
 
