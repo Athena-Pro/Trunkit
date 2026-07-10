@@ -590,8 +590,10 @@ BEGIN
         v_ev := COALESCE(v_ev, '{}'::jsonb)
                 || jsonb_build_object('verified_by', 'cert.kernel_verify');
     ELSE
-        -- Legacy fallback: a witness with no checkable schema.
-        v_ok := (v_witness IS NOT NULL);
+        -- Legacy fallback: a witness with no checkable schema. No witness at
+        -- all means there is nothing to check: UNVERIFIED (NULL), never
+        -- refuted — absence of evidence is not refutation.
+        v_ok := CASE WHEN v_witness IS NOT NULL THEN TRUE END;
         v_ev := COALESCE(v_witness, jsonb_build_object(
             'note', 'no probe_sql and no checkable witness; formal attestation required'));
     END IF;
