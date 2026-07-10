@@ -1,0 +1,118 @@
+{
+  "claims": [
+    {
+      "claim": {
+        "id": 872,
+        "domain": "exact_int",
+        "method": "formal_external",
+        "probe_sql": null,
+        "statement": "OEIS A080170 (Stephan Conjecture 17): for k >= 2, gcd(C(2k,k),C(3k,k),...,C((k+1)k,k)) = 1 iff (k+1)/P > P where P is the largest prime-power divisor of k+1 \u2014 Lean theorem gcdCondition_iff_primePowerCondition",
+        "claim_kind": "formal",
+        "created_at": "2026-07-10T03:51:42.783724+00:00",
+        "subject_ref": {
+          "id": "A080170",
+          "decl": "OeisA80170.gcdCondition_iff_primePowerCondition",
+          "arxiv": "2606.22997",
+          "artifact": "guodk/formal-conjectures@0720658 FormalConjectures/OEIS/80170.lean",
+          "conjecture": "Stephan 2004 #17"
+        },
+        "subject_kind": "oeis_conjecture"
+      },
+      "witness": {
+        "body": {
+          "decl": "OeisA80170.gcdCondition_iff_primePowerCondition",
+          "type": "\u2200 (k : Nat), instLENat.le 2 k \u2192 Iff (OeisA80170.GCDCondition k) (OeisA80170.PrimePowerCondition (instHAdd.hAdd k 1))",
+          "axioms": [
+            "Classical.choice",
+            "propext",
+            "Quot.sound"
+          ],
+          "artifact": "guodk/formal-conjectures@0720658844d76a50d48e4baa152eef14d4462907 FormalConjectures/OEIS/80170.lean",
+          "toolchain": {
+            "lean": "leanprover/lean4:v4.27.0",
+            "mathlib_rev": "a3a10db0e9d66acbebf76c5e6a135066525ac900"
+          },
+          "uses_sorry": false,
+          "closure_digest": "a79efc1f62f8"
+        },
+        "kind": "term"
+      },
+      "artifact": {
+        "kind": "lean",
+        "path": "proofs/fc_a080170",
+        "sha256": "a79efc1f62f8deda953df0fc539200cc65b48c02d14f43decebe5462a1c559db",
+        "checker_cmd": "bash -c \"LEAN_AUDIT_MODULE=FormalConjectures.OEIS.80170 LEAN_BUILD_TARGET=FormalConjectures.OEIS.\u00ab80170\u00bb bash tools/lean_check.sh proofs/fc_a080170 OeisA80170.gcdCondition_iff_primePowerCondition\"",
+        "registered_at": "2026-07-10T04:43:17.559494+00:00"
+      },
+      "derivation": null,
+      "certificate": {
+        "seq": 3,
+        "status": "valid",
+        "evidence": {
+          "decl": "OeisA80170.gcdCondition_iff_primePowerCondition",
+          "kind": "lean",
+          "type": "\u2200 (k : Nat), instLENat.le 2 k \u2192 Iff (OeisA80170.GCDCondition k) (OeisA80170.PrimePowerCondition (instHAdd.hAdd k 1))",
+          "axioms": [
+            "Classical.choice",
+            "propext",
+            "Quot.sound"
+          ],
+          "exit_code": 0,
+          "uses_sorry": false,
+          "checker_cmd": "bash -c \"LEAN_AUDIT_MODULE=FormalConjectures.OEIS.80170 LEAN_BUILD_TARGET=FormalConjectures.OEIS.\u00ab80170\u00bb bash tools/lean_check.sh proofs/fc_a080170 OeisA80170.gcdCondition_iff_primePowerCondition\"",
+          "stderr_tail": "Build completed successfully (8029 jobs).",
+          "stdout_tail": "{\"decl\":\"OeisA80170.gcdCondition_iff_primePowerCondition\",\"type\":\"\u2200 (k : Nat), instLENat.le 2 k \u2192 Iff (OeisA80170.GCDCondition k) (OeisA80170.PrimePowerCondition (instHAdd.hAdd k 1))\",\"axioms\":[\"Classical.choice\",\"propext\",\"Quot.sound\"],\"uses_sorry\":false,\"ok\":true}",
+          "allow_native": false,
+          "artifact_sha256": "a79efc1f62f8deda953df0fc539200cc65b48c02d14f43decebe5462a1c559db"
+        },
+        "checked_at": "2026-07-10T04:48:49.722885+00:00",
+        "valid_under": {
+          "toolchain": {
+            "lean": "leanprover/lean4:v4.27.0",
+            "mathlib_rev": "a3a10db0e9d66acbebf76c5e6a135066525ac900"
+          },
+          "artifact_path": "proofs/fc_a080170",
+          "artifact_sha256": "a79efc1f62f8deda953df0fc539200cc65b48c02d14f43decebe5462a1c559db",
+          "calx_schema_version": null
+        }
+      }
+    },
+    {
+      "claim": {
+        "id": 874,
+        "domain": "exact_int",
+        "method": "comp_sql",
+        "probe_sql": "WITH tri AS (SELECT x*(x+1)/2 AS v FROM generate_series(0,200) x WHERE x*(x+1)/2 <= 20000),\n      pent AS (SELECT y*(3*y+1)/2 AS v FROM generate_series(0,120) y WHERE y*(3*y+1)/2 <= 20000),\n      hept AS (SELECT z*(5*z+1)/2 AS v FROM generate_series(0,95) z WHERE z*(5*z+1)/2 <= 20000),\n      sums AS (SELECT DISTINCT t.v + p.v + h.v AS n FROM tri t, pent p, hept h WHERE t.v + p.v + h.v <= 20000),\n      missing AS (SELECT g.n FROM generate_series(0,20000) g(n) LEFT JOIN sums s ON s.n = g.n WHERE s.n IS NULL)\n SELECT (SELECT count(*) FROM missing) = 0,\n        jsonb_build_object('n_max', 20000, 'missing_count', (SELECT count(*) FROM missing), 'first_missing', (SELECT min(n) FROM missing))",
+        "statement": "OEIS A287616 finite check: every integer 0 <= n <= 20000 is x(x+1)/2 + y(3y+1)/2 + z(5z+1)/2 with x,y,z natural",
+        "claim_kind": "computational",
+        "created_at": "2026-07-10T03:51:42.783724+00:00",
+        "subject_ref": {
+          "id": "A287616",
+          "arxiv": "2606.26035",
+          "range": "0..20000"
+        },
+        "subject_kind": "oeis_conjecture"
+      },
+      "witness": null,
+      "artifact": null,
+      "derivation": null,
+      "certificate": {
+        "seq": 1,
+        "status": "valid",
+        "evidence": {
+          "n_max": 20000,
+          "first_missing": null,
+          "missing_count": 0
+        },
+        "checked_at": "2026-07-10T03:52:22.215618+00:00",
+        "valid_under": {
+          "kan_objects": 253,
+          "curry_entities": 68,
+          "calx_schema_version": null
+        }
+      }
+    }
+  ],
+  "exported_at": "2026-07-10T04:54:16.875481+00:00",
+  "trunk_bundle_version": 1
+}
