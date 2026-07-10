@@ -67,3 +67,6 @@ local/tests/test_loom_lift.py
 local/backups/
 proofs/loom.py
 proofs/loom_lift.py
+
+# Benchmark run logs are local artifacts
+*.log
