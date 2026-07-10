@@ -15,18 +15,18 @@ where k = (n - r) // q runs 0, 1, 2, … within each residue class.
 """
 from __future__ import annotations
 
-import sys, math, io
+import math
+import sys
+
 # Force UTF-8 on Windows consoles that default to cp1252
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-from fractions import Fraction
-from itertools import combinations_with_replacement
 from collections import defaultdict
+from fractions import Fraction
 from typing import NamedTuple
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "src"))
 from calx.kernel import check_unit_fraction
-
 
 # ---------------------------------------------------------------------------
 # 1.  Generic search  m/n = 1/a + 1/b + 1/c  (a ≤ b ≤ c)
@@ -442,7 +442,7 @@ def discover_families(
                             print(f"    b(k) = {fb}")
                             print(f"    c(k) = {fc}")
                             print(f"    (k = (n - {r}) / {q})")
-                            print(f"    Sample: ", end="")
+                            print("    Sample: ", end="")
                             for n, a, b, c in pts[:4]:
                                 ok = verify(m, n, [a, b, c])
                                 print(f"n={n}→({a},{b},{c}){'✓' if ok else '✗'} ", end="")

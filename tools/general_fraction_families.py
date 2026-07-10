@@ -15,15 +15,14 @@ A new check_general_fraction function handles the full 3-fraction case.
 """
 from __future__ import annotations
 
-import sys, math, io
-from fractions import Fraction
+import math
+import sys
 from collections import defaultdict
-from typing import NamedTuple
+from fractions import Fraction
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "src"))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-from calx.kernel import check_unit_fraction
 
 
 # ---------------------------------------------------------------------------
@@ -234,10 +233,8 @@ def discover_general_families(
             pts = [(n, *solutions[n]) for n in solved_ns if n % mod_q == r]
             if len(pts) < 4:
                 continue
-            ns  = [x[0] for x in pts]
             as_ = [x[1] for x in pts]
             bs  = [x[2] for x in pts]
-            cs  = [x[3] for x in pts]
 
             da = _poly_degree(as_)
             db = _poly_degree(bs)

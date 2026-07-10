@@ -28,7 +28,6 @@ from collections.abc import Iterator
 
 from calx import db
 
-
 USER_AGENT = "calx OEIS loader (educational; one-shot; oeis.org/A123456/b123456.txt)"
 RATE_LIMIT_S = 1.0
 MAX_RETRIES = 1
@@ -198,7 +197,6 @@ WHITELIST: list[tuple[str, str, str, str]] = [
 
 def fetch_b_file(seq_id: str) -> Iterator[tuple[int, int]]:
     """Yield (idx, value) from oeis.org/A___/b___.txt. Skips comments + blanks."""
-    num = seq_id[1:].lstrip("0") or "0"
     url = f"https://oeis.org/{seq_id}/b{seq_id[1:]}.txt"
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
 

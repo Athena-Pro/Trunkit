@@ -5,10 +5,9 @@ The conjecture (open for primes) says this decomposition always exists for n >= 
 """
 from __future__ import annotations
 
-import sys
 import math
+import sys
 from fractions import Fraction
-from typing import Iterator
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1] / "src"))
 from calx.kernel import check_unit_fraction
