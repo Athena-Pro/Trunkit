@@ -253,7 +253,8 @@ def verify_lean(project_root, file_digests, trusted, checker_cmd, toolchain):
     try:
         proc = subprocess.run(
             checker_cmd, cwd=str(PROJECT_DIR), shell=True,
-            capture_output=True, text=True, timeout=LEAN_CHECKER_TIMEOUT,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=LEAN_CHECKER_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
         return "error", {"reason": "lean checker timeout", "checker_cmd": checker_cmd}, extra_vu
@@ -375,6 +376,7 @@ def main() -> int:
                                 proc = subprocess.run(
                                     checker_cmd, cwd=str(PROJECT_DIR), shell=True,
                                     capture_output=True, text=True,
+                                    encoding="utf-8", errors="replace",
                                     timeout=CHECKER_TIMEOUT,
                                 )
                                 status = "valid" if proc.returncode == 0 else "refuted"
