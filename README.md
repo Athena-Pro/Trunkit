@@ -182,6 +182,11 @@ trunkit close [--write]
 # (primitive eigenforms) + kan Perron-Frobenius attractor — and
 # records eigenform claims.
 
+trunkit revoke <claim_id> --reason TEXT [--write]
+# Revoke the claim's latest certificate: an append-only event, never a
+# mutation. Standing reads 'revoked'; witnesses riding on the revoked
+# certificate stop counting in verify. Re-attest to issue a fresh one.
+
 trunkit witness <claim_id> --kind KIND --body JSON [--write]
 # Attach a structured proof witness to a claim.
 # KIND: term | trace | counterexample | hash_chain | kan_diagram | quote_span
@@ -296,6 +301,7 @@ Beyond integer-fact and categorical claims, cert ships re-checkable, **exact** c
 | Proofs compose | `cert.derivation` encodes a DAG of premises → conclusion under named rules |
 | Consumer re-verifies | `cert.verify(claim_id)` replays without INSERTing — safe for untrusted callers |
 | Bundle is portable | `cert.export_bundle(ids[])` emits self-contained JSONB: claims + certs + witnesses + derivations |
+| Certificates have a lifecycle | `cert.revoke[_claim]` appends a revocation (never mutates); `SET trunkit.cert_ttl` stamps a validity window inside the hash-committed `valid_under`; `SET trunkit.signer` binds an identity. `cert.standing.effective_status` reads `revoked` / `expired`; revocation is loss of trust, **not** refutation |
 
 ---
 

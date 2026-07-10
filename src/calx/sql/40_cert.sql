@@ -93,6 +93,16 @@ BEGIN
         'kan_objects', (SELECT count(*) FROM kan.object)
     );
 
+    -- Optional validity window (step 100 lifecycle): SET trunkit.cert_ttl to
+    -- an interval (e.g. '30 days') to stamp valid_from/valid_until. Stored
+    -- inside valid_under so the ledger row_hash commits to it unchanged.
+    IF COALESCE(NULLIF(current_setting('trunkit.cert_ttl', true), ''), '') <> '' THEN
+        v_valid_under := v_valid_under || jsonb_build_object(
+            'valid_from',  now(),
+            'valid_until', now() + current_setting('trunkit.cert_ttl')::interval
+        );
+    END IF;
+
     IF v_claim.probe_sql IS NULL THEN
         v_status   := 'unverified';
         v_evidence := jsonb_build_object('note', 'no probe; external/empirical pending');

@@ -22,6 +22,7 @@ to let its probes read.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import json
 import pathlib
@@ -30,6 +31,9 @@ from dataclasses import dataclass, field
 from psycopg import Connection
 
 BUNDLE_VERSION = 1
+# v2 (ledger overlay) is a superset: same shape plus row_hash/prev_hash/
+# premise_hashes/ledger_root; every v1 check applies unchanged.
+ACCEPTED_BUNDLE_VERSIONS = frozenset({1, 2})
 
 
 @dataclass
@@ -58,9 +62,10 @@ def load_bundle(path: str | pathlib.Path) -> dict:
     if not isinstance(data, dict):
         raise ValueError("bundle is not a JSON object")
     version = data.get("trunk_bundle_version")
-    if version != BUNDLE_VERSION:
+    if version not in ACCEPTED_BUNDLE_VERSIONS:
         raise ValueError(
-            f"unsupported trunk_bundle_version: {version!r} (expected {BUNDLE_VERSION})"
+            f"unsupported trunk_bundle_version: {version!r} "
+            f"(accepted: {sorted(ACCEPTED_BUNDLE_VERSIONS)})"
         )
     claims = data.get("claims")
     if not isinstance(claims, list) or not claims:
@@ -150,7 +155,38 @@ def _own_verdict(
     if cert_status and cert_status != "valid":
         result.notes.append(f"producer certificate status was '{cert_status}'")
 
+    # Lifecycle (step 100): a revoked or expired certificate degrades any
+    # verdict that RESTS ON that certificate (the witness path) to UNVERIFIED.
+    # A fresh probe replay is our own evidence and stands. Never refutes —
+    # loss of trust is not refutation of the claim.
+    revocation = entry.get("revocation")
+    if revocation:
+        result.notes.append(
+            "certificate REVOKED by "
+            f"{revocation.get('revoked_by', '?')}: {revocation.get('reason', '?')}"
+        )
+        if not probe_sql and result.ok is True:
+            result.ok = None
+    valid_until = ((entry.get("certificate") or {}).get("valid_under") or {}).get(
+        "valid_until"
+    )
+    if valid_until is not None and _is_past(valid_until):
+        result.notes.append(f"certificate validity window expired at {valid_until}")
+        if not probe_sql and result.ok is True:
+            result.ok = None
+
     return result
+
+
+def _is_past(iso_ts: str) -> bool:
+    """True iff the ISO-8601 timestamp is in the past (unparseable => False)."""
+    try:
+        ts = datetime.datetime.fromisoformat(str(iso_ts))
+    except ValueError:
+        return False
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=datetime.UTC)
+    return ts < datetime.datetime.now(datetime.UTC)
 
 
 def _apply_derivations(bundle: dict, results: list[ClaimResult]) -> None:

@@ -31,6 +31,7 @@ import json
 import sys
 
 import psycopg
+from psycopg import errors
 
 from . import db, generate, validate
 
@@ -116,14 +117,23 @@ def _cmd_standing(args: argparse.Namespace) -> int:
         where.append("method = %s")
         params.append(args.method)
     if args.status:
-        where.append("status = %s")
+        where.append("{status_col} = %s")
         params.append(args.status)
-    sql = "SELECT claim_id, statement, method, status, checked_at FROM cert.standing"
-    if where:
-        sql += " WHERE " + " AND ".join(where)
-    sql += " ORDER BY claim_id"
+
+    def _sql(status_col: str) -> str:
+        sql = (f"SELECT claim_id, statement, method, {status_col}, checked_at"
+               " FROM cert.standing")
+        if where:
+            sql += " WHERE " + " AND ".join(w.format(status_col=status_col) for w in where)
+        return sql + " ORDER BY claim_id"
+
     with db.connect(args.dsn) as conn, conn.cursor() as cur:
-        cur.execute(sql, params)
+        try:
+            # lifecycle-aware (step 100): 'revoked'/'expired' supersede 'valid'
+            cur.execute(_sql("effective_status"), params)
+        except errors.UndefinedColumn:
+            conn.rollback()
+            cur.execute(_sql("status"), params)
         rows = cur.fetchall()
     if not rows:
         print("  (no claims match)")
@@ -240,6 +250,44 @@ def _cmd_register_lean(args: argparse.Namespace) -> int:
         art_id = cur.fetchone()[0]
     print(f"  registered lean artifact {art_id} for claim {args.claim_id} "
           f"({len(rels)} files, decl {args.decl})")
+    return 0
+
+
+def _cmd_revoke(args: argparse.Namespace) -> int:
+    try:
+        evidence = json.loads(args.evidence)
+    except json.JSONDecodeError as exc:
+        print(f"  error: --evidence is not valid JSON: {exc}")
+        return 2
+
+    with db.connect(args.dsn) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, seq, status FROM cert.certificate"
+            " WHERE claim_id = %s ORDER BY seq DESC LIMIT 1",
+            (args.claim_id,),
+        )
+        row = cur.fetchone()
+        if row is None:
+            print(f"  error: claim {args.claim_id} has no certificate to revoke")
+            return 1
+        cert_id, seq, status = row
+
+        if not args.write:
+            print(f"  [dry-run] would revoke claim {args.claim_id}'s latest certificate")
+            print(f"    certificate : id={cert_id} seq={seq} status={status}")
+            print(f"    reason      : {args.reason}")
+            print("  pass --write to record (revocation is append-only and monotone;")
+            print("  re-attest with `trunkit check --write` to issue a fresh certificate)")
+            return 0
+
+        cur.execute(
+            "SELECT r.id, r.certificate_id, r.revoked_by, r.revoked_at"
+            "  FROM cert.revoke_claim(%s, %s, %s::jsonb) r",
+            (args.claim_id, args.reason, json.dumps(evidence)),
+        )
+        rid, rcert, rby, rat = cur.fetchone()
+    print(f"  revoked certificate {rcert} (claim {args.claim_id}) — "
+          f"revocation {rid} by {rby} at {rat:%Y-%m-%d %H:%M}")
     return 0
 
 
@@ -499,6 +547,14 @@ def build_parser() -> argparse.ArgumentParser:
     cl.add_argument("--write", action="store_true",
                     help="record eigenform claims (dry-run without)")
     cl.set_defaults(func=_cmd_close)
+
+    rv = sub.add_parser("revoke",
+                        help="revoke a claim's latest certificate (append-only event)")
+    rv.add_argument("claim_id", type=int)
+    rv.add_argument("--reason", required=True, help="why trust in the certificate is withdrawn")
+    rv.add_argument("--evidence", default="{}", help="optional JSON evidence body")
+    rv.add_argument("--write", action="store_true", help="record the revocation (dry-run without)")
+    rv.set_defaults(func=_cmd_revoke)
 
     wi = sub.add_parser("witness", help="attach a structured proof witness to a claim")
     wi.add_argument("claim_id", type=int)

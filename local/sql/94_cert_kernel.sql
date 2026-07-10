@@ -564,10 +564,13 @@ BEGIN
         RETURN;
     END IF;
 
+    -- Latest stored witness, skipping any that ride on a revoked certificate
+    -- (step 100 lifecycle).
     SELECT w.body INTO v_witness
       FROM cert.witness w
       JOIN cert.certificate ce ON ce.id = w.certificate_id
      WHERE ce.claim_id = p_claim_id
+       AND NOT EXISTS (SELECT 1 FROM cert.revocation r WHERE r.certificate_id = ce.id)
      ORDER BY ce.seq DESC LIMIT 1;
 
     -- For an unchecked kernel claim, fall back to its submitted obligation.
@@ -597,6 +600,22 @@ BEGIN
         v_ev := COALESCE(v_witness, jsonb_build_object(
             'note', 'no probe_sql and no checkable witness; formal attestation required'));
     END IF;
+
+    -- Surface lifecycle state of the LATEST certificate (step 100;
+    -- informational — probe replay is fresh evidence and stands on its own).
+    DECLARE v_life JSONB;
+    BEGIN
+        SELECT jsonb_build_object('revoked_at', rv.revoked_at, 'reason', rv.reason)
+          INTO v_life
+          FROM cert.certificate ce
+          JOIN cert.revocation rv ON rv.certificate_id = ce.id
+         WHERE ce.claim_id = p_claim_id
+         ORDER BY ce.seq DESC LIMIT 1;
+        IF v_life IS NOT NULL THEN
+            v_ev := v_ev || jsonb_build_object(
+                'lifecycle', v_life || '{"state":"revoked"}'::jsonb);
+        END IF;
+    END;
 
     IF EXISTS (SELECT 1 FROM cert.derivation WHERE conclusion_id = p_claim_id) THEN
         DECLARE

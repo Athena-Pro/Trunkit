@@ -66,7 +66,7 @@ def test_load_bundle_roundtrip(tmp_path):
     [
         "not json {",
         json.dumps([1, 2]),
-        json.dumps({"trunk_bundle_version": 2, "claims": [{"claim": {}}]}),
+        json.dumps({"trunk_bundle_version": 3, "claims": [{"claim": {}}]}),
         json.dumps({"trunk_bundle_version": 1, "claims": []}),
         json.dumps({"trunk_bundle_version": 1, "claims": [{"nope": 1}]}),
     ],
@@ -101,6 +101,47 @@ def test_probe_claim_unverified_without_db():
     (result,) = verify_bundle(bundle)
     assert result.ok is None
     assert any("requires a database" in n for n in result.notes)
+
+
+def test_revoked_witness_claim_degrades_to_unverified_offline():
+    entry = _entry(witness={"kind": "term", "body": {}})
+    entry["revocation"] = {
+        "reason": "generator compromised", "revoked_by": "prover", "revoked_at": "2026-01-01"
+    }
+    (result,) = verify_bundle(_bundle(entry))
+    assert result.ok is None  # revocation is loss of trust, not refutation
+    assert any("REVOKED" in n for n in result.notes)
+
+
+def test_revocation_does_not_touch_probe_verdicts_offline():
+    entry = _entry(probe_sql="SELECT TRUE, '{}'::jsonb")
+    entry["revocation"] = {"reason": "x", "revoked_by": "p", "revoked_at": "2026-01-01"}
+    (result,) = verify_bundle(_bundle(entry))  # no DB: probe already None
+    assert result.ok is None
+    assert any("REVOKED" in n for n in result.notes)
+
+
+def test_expired_window_degrades_witness_claim_offline():
+    entry = _entry(witness={"kind": "term", "body": {}})
+    entry["certificate"]["valid_under"] = {"valid_until": "2020-01-01T00:00:00+00:00"}
+    (result,) = verify_bundle(_bundle(entry))
+    assert result.ok is None
+    assert any("expired" in n for n in result.notes)
+
+
+def test_unexpired_window_leaves_verdict_alone():
+    entry = _entry(witness={"kind": "term", "body": {}})
+    entry["certificate"]["valid_under"] = {"valid_until": "2099-01-01T00:00:00+00:00"}
+    (result,) = verify_bundle(_bundle(entry))
+    assert result.ok is True
+
+
+def test_v2_bundle_version_accepted(tmp_path):
+    bundle = _bundle(_entry(witness={"kind": "term", "body": {}}))
+    bundle["trunk_bundle_version"] = 2
+    path = tmp_path / "v2.json"
+    path.write_text(json.dumps(bundle), encoding="utf-8")
+    assert load_bundle(path)["trunk_bundle_version"] == 2
 
 
 def test_nonvalid_producer_status_is_surfaced():

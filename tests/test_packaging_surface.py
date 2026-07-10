@@ -9,11 +9,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_unified_schema_tracks_all_numbered_sql_files():
+    # Apply order is (numeric prefix, remainder) — '99_' before '100_' — so
+    # mirror calx.db.schema_order, not lexicographic filename order.
     sql_dir = ROOT / "src" / "calx" / "sql"
     expected = tuple(
-        path.name
-        for path in sorted(sql_dir.iterdir(), key=lambda path: path.name)
-        if path.is_file() and path.suffix == ".sql" and path.name[:2].isdigit()
+        sorted(
+            (
+                path.name
+                for path in sql_dir.iterdir()
+                if path.is_file() and path.suffix == ".sql" and path.name[:2].isdigit()
+            ),
+            key=calx_db.schema_order,
+        )
     )
     assert expected == calx_db.UNIFIED_FILES
 
