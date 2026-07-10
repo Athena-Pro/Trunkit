@@ -34,8 +34,12 @@ if grep -q 'require .*[Mm]athlib' lakefile.lean lakefile.toml 2>/dev/null; then
   timeout "$TIMEOUT" lake exe cache get >/dev/null 2>&1 || true
 fi
 
-# 2. build — failure ⇒ refuted
-if ! timeout "$TIMEOUT" lake build >&2; then
+# 2. build — failure ⇒ refuted. LEAN_BUILD_TARGET optionally scopes the build
+#    to one module (for proofs embedded in a large library, e.g.
+#    formal-conjectures, where the default whole-library build cannot fit any
+#    reasonable timeout); unset ⇒ the project's default targets, as before.
+# shellcheck disable=SC2086  # word-splitting of the target is intentional
+if ! timeout "$TIMEOUT" lake build ${LEAN_BUILD_TARGET:-} >&2; then
   echo "{\"decl\":\"$DECL\",\"ok\":false,\"error\":\"lake build failed\"}"
   exit 1
 fi
