@@ -1,4 +1,4 @@
-import psycopg, datetime
+import psycopg, datetime, os
 c = psycopg.connect("postgresql://trunk:trunk@localhost:5434/trunk")
 cur = c.cursor()
 cur.execute("SELECT count(*) FILTER (WHERE status IN ('valid','pass')), count(*) FILTER (WHERE status='refuted'), count(*) FILTER (WHERE status IN ('unverified','unchecked','error')), count(*) FROM cert.board")
@@ -30,8 +30,9 @@ L.append("- **✅ verified** — a probe ran and confirmed it (re-runnable; not 
 L.append("- **❌ failed** — a probe ran and it did *not* hold. A real, surfaced contradiction.")
 L.append("- **❓ unknown** — honestly not yet checkable (no data, open problem, or tooling missing). *Never* shown as green.\n")
 L.append("*Backed by one Postgres database; the `.curry`/`.lace`/per-method dotfiles are gone — methods are lenses (schemas) in the one ledger, not files.*")
-open("C:/AI-Local/Trunk/STATUS.md","w",encoding="utf-8").write("\n".join(L))
-print(f"wrote STATUS.md : {v} verified / {f} failed / {u} unknown / {t} total, {len(fails)} failures listed")
+_repo = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+open(os.path.join(_repo, "docs", "reports", "STATUS.md"), "w", encoding="utf-8").write("\n".join(L))
+print(f"wrote docs/reports/STATUS.md : {v} verified / {f} failed / {u} unknown / {t} total, {len(fails)} failures listed")
 c.close()
 
 # Also regenerate the HTML board graphic

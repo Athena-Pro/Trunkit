@@ -5,19 +5,18 @@ Single-pass against a frozen catalog snapshot. Multiset output in composition_me
 
 from __future__ import annotations
 
+# Reuse Tier-2 OEIS client + scorer.
+import importlib.util
 import logging
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from psycopg import Connection
 from psycopg.types.json import Jsonb
 
 from calx import db
-
-# Reuse Tier-2 OEIS client + scorer.
-import importlib.util
-import sys
-from pathlib import Path
 
 _OEIS_PATH = Path(__file__).resolve().parent / "oeis_match.py"
 
@@ -370,7 +369,6 @@ def generate_orbit_pairs(
             stream = compose_index_stream(base_idx, indices)
             assert stream
             cid = composite_id_index(base_id, "orbit", str(orbit_id))
-            formula = f"compose_index({base_id}, orbit {orbit_id} {rel} from {start_n})"
             specs.append(
                 ComposeSpec(
                     composite_id=cid,

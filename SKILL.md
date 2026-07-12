@@ -590,7 +590,7 @@ Three labs are co-resident: interlace (operator closure, depth 61), hypergroup (
 
 **Live build/test (Tier 2, step 93).** `cert.live_build` + `tools/tel_build_check.py [--only ID]`. "valid" means *built today* (cargo / rebar3 / mix run), not asserted. Toolchain-not-invocable → `unverified` (never a false `refuted`).
 
-**Status board (step 93).** `cert.board` / `cert.board_summary` → plain-language areas + verdicts. `python tools/gen_status.py` regenerates `STATUS.md` — the single layperson surface.
+**Status board (step 93).** `cert.board` / `cert.board_summary` → plain-language areas + verdicts. `python local/tools/gen_status.py` regenerates `docs/reports/STATUS.md` — the single layperson surface.
 
 **Crown consensus — OCTT (step 93).** `cert.evidence_vote` + `cert.crown_consensus(claim, topology[, k])`. Competing evidence from different models adjudicated by Open Crown topology (`veto`=max, `parallel`=min, `series`=sum, `threshold`=k-of-n). The partial-closure window → **`contested`** (models disagree; neither fake-green nor flat-refuted). `K*` = evidence budget to close the crown.
 

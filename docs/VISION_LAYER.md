@@ -1,6 +1,6 @@
 # Vision / image layer — design & status
 
-*Prepared 2026-06-20. Scope chosen: image **anchoring** + perceptual **similarity** (cosine), plus a **figure→data extraction** starting point. Companion to `Trunkit_Erdos_AI_Capability_Fit.md` (the §2(c) "scientific images" cluster).*
+*Prepared 2026-06-20. Scope chosen: image **anchoring** + perceptual **similarity** (cosine), plus a **figure→data extraction** starting point. Companion to `docs/reports/Trunkit_Erdos_AI_Capability_Fit.md` (the §2(c) "scientific images" cluster).*
 
 ## Principle: minimality preserved
 

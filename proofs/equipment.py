@@ -56,7 +56,6 @@ import hashlib
 import itertools
 import sys
 
-
 # ---- finite posets (thin categories) = the certified strata shapes --------
 
 def chain(n):
@@ -106,7 +105,6 @@ def is_bimodule(rel, X, Y):
 
 def pcompose(R, S, X, Y, Z):
     """R: X-|->Y , S: Y-|->Z  ==>  X-|->Z  (thin-category coend = exists y)."""
-    Yel = Y[0]
     base = {(x, z) for (x, y1) in R for (y2, z) in S
             if y1 == y2}
     return closure(base, X, Z)
@@ -181,7 +179,6 @@ def main() -> int:
     E1 = E2 = True
     for name, mp, X, Y in arrows:
         e1, un, co, z1, z2, fsh, fst = check_companion_conjoint(mp, X, Y)
-        ok = e1 and un and co and z1 and z2
         E1 = E1 and (un and co and z1)        # companion + zig-zag
         E2 = E2 and (e1 and co and z2)        # conjoint + dual binding
         sig.append((name, sorted(fsh), sorted(fst),
@@ -189,7 +186,6 @@ def main() -> int:
 
     # E3  FIBRANT / base change: exhaustive over EVERY bimodule A -|-> B
     E3 = True
-    p, q = f, {0: 0, 1: 1, 2: 1, 3: 2}     # p:A->B (reuse f), q:B->A monotone
     # niche maps for restriction: p2: A->A , q2: A->B  (so M:A-|->B restricts)
     p2 = {0: 0, 1: 0, 2: 1}                 # A -> A monotone
     q2 = {0: 0, 1: 2, 2: 3}                 # A -> B monotone

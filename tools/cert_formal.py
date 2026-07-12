@@ -25,7 +25,7 @@ import os
 import subprocess
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import psycopg
@@ -402,7 +402,7 @@ def main() -> int:
 
         conn.commit()
 
-    print(f"\nformal harness complete @ {datetime.now(timezone.utc).isoformat()}")
+    print(f"\nformal harness complete @ {datetime.now(UTC).isoformat()}")
     return rc
 
 
