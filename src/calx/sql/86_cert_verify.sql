@@ -36,8 +36,10 @@ BEGIN
         END;
     ELSE
         -- Formal/empirical: replay latest witness as the verdict.
-        -- ok=TRUE iff a witness exists (harness-attested).
-        v_ok := (v_witness IS NOT NULL);
+        -- ok=TRUE iff a witness exists (harness-attested); no witness means
+        -- there is nothing to check, which is UNVERIFIED (NULL), never
+        -- refuted — absence of evidence is not refutation.
+        v_ok := CASE WHEN v_witness IS NOT NULL THEN TRUE END;
         v_ev := COALESCE(v_witness, jsonb_build_object(
             'note', 'no probe_sql and no stored witness; formal attestation required'
         ));

@@ -88,9 +88,12 @@ def test_witness_claim_valid_offline():
     assert result.ok is True
 
 
-def test_witnessless_formal_claim_refuted_offline():
+def test_witnessless_formal_claim_unverified_offline():
+    # No probe and no witness means there is nothing to check: UNVERIFIED,
+    # never refuted — absence of evidence is not refutation.
     (result,) = verify_bundle(_bundle(_entry(probe_sql=None, witness=None)))
-    assert result.ok is False
+    assert result.ok is None
+    assert any("unverified" in n for n in result.notes)
 
 
 def test_probe_claim_unverified_without_db():
@@ -169,14 +172,32 @@ def test_derivation_missing_premise_degrades_to_unverified():
     assert result.ok is None
 
 
-def test_derivation_refuted_premise_refutes_conclusion():
-    premise = _entry(claim_id=1, witness=None)  # refuted: no witness, no probe
+def test_derivation_unverified_premise_degrades_conclusion():
+    premise = _entry(claim_id=1, witness=None)  # unverified: no witness, no probe
     conclusion = _entry(
         claim_id=2,
         witness={"kind": "term", "body": {}},
         derivation={"premise_ids": [1], "rule": "modus_ponens"},
     )
     results = verify_bundle(_bundle(premise, conclusion))
+    assert results[0].ok is None
+    assert results[1].ok is None
+
+
+def test_derivation_refuted_premise_refutes_conclusion(tmp_path):
+    blob = tmp_path / "premise.lean"
+    blob.write_bytes(b"tampered")
+    premise = _entry(  # refuted: artifact hash mismatch
+        claim_id=1,
+        witness={"kind": "hash_chain", "body": {}},
+        artifact={"path": "premise.lean", "sha256": "0" * 64},
+    )
+    conclusion = _entry(
+        claim_id=2,
+        witness={"kind": "term", "body": {}},
+        derivation={"premise_ids": [1], "rule": "modus_ponens"},
+    )
+    results = verify_bundle(_bundle(premise, conclusion), base_dir=tmp_path)
     assert results[0].ok is False
     assert results[1].ok is False
 

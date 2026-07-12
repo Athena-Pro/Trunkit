@@ -30,6 +30,14 @@ open Lean
 def baseAllowed : List Name :=
   [``propext, ``Classical.choice, ``Quot.sound]
 
+/-- `String.toName` parses an all-digit segment (e.g. the `80170` in
+`FormalConjectures.OEIS.80170`) as a numeric name part, which cannot map to a
+module file. Coerce numeric parts back to string atoms. -/
+def asModuleName : Name → Name
+  | .anonymous => .anonymous
+  | .str p s   => .str (asModuleName p) s
+  | .num p n   => .str (asModuleName p) (toString n)
+
 def jsonEscape (s : String) : String :=
   s.foldl (init := "") fun acc c =>
     acc ++ match c with
@@ -49,12 +57,12 @@ unsafe def main (args : List String) : IO UInt32 := do
 
   initSearchPath (← findSysroot)
   -- import the proof module so the declaration is resolvable
-  let env ← importModules #[{ module := modStr.toName }] {} 0
+  let env ← importModules #[{ module := asModuleName modStr.toName }] {} 0
   let declName := declStr.toName
 
   match env.find? declName with
   | none =>
-    IO.println s!"{{\"decl\":\"{jsonEscape declStr}\",\"ok\":false,\"error\":\"decl not found\"}}"
+    IO.println <| "{\"decl\":\"" ++ jsonEscape declStr ++ "\",\"ok\":false,\"error\":\"decl not found\"}"
     return 2
   | some ci =>
     -- collect axioms transitively
@@ -65,7 +73,8 @@ unsafe def main (args : List String) : IO UInt32 := do
     let ok := (¬ usesSorry) && disallowed.isEmpty
     let typeStr ←
       try
-        let fmt ← (PrettyPrinter.ppExpr ci.type).run' (ctx := {env := env}) (s := {})
+        let (fmt, _) ← ((PrettyPrinter.ppExpr ci.type).run').toIO
+          { fileName := "<AxiomAudit>", fileMap := default } { env := env }
         pure (toString fmt)
       catch _ => pure "<unprintable>"
     let axJson := String.intercalate ","

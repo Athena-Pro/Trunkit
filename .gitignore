@@ -70,3 +70,6 @@ proofs/loom_lift.py
 
 # Benchmark run logs are local artifacts
 *.log
+
+# External Lean proof artifact clones (pinned by cert file_digests, not vendored)
+proofs/fc_a080170/

@@ -128,11 +128,13 @@ def _own_verdict(
             result.ok, note = _replay_probe(conn, probe_sql)
             result.notes.append(note)
     else:
-        # Formal/empirical tier: witness presence is the verdict (cert.verify parity).
-        result.ok = witness is not None
+        # Formal/empirical tier: witness presence is the verdict (cert.verify
+        # parity). No witness => UNVERIFIED, not refuted — absence of evidence
+        # is not refutation.
+        result.ok = True if witness is not None else None
         result.notes.append(
             f"witness present (kind={witness.get('kind')})" if witness
-            else "no probe_sql and no witness"
+            else "no probe_sql and no witness (unverified)"
         )
 
     artifact = entry.get("artifact")
