@@ -24,6 +24,9 @@ def dir_and_cmd(path):
             return d, ["cargo","check","--quiet"]+extra
         if os.path.isfile(os.path.join(d, "rebar.config")): return d, ["rebar3","compile"]
         if os.path.isfile(os.path.join(d, "mix.exs")):       return d, ["mix","compile"]
+        # Lean 4 lake project (e.g. lean-formalization/CondensedTEL): elaboration
+        # health of the formal tower, not just cargo builds (2026-07-17).
+        if os.path.isfile(os.path.join(d, "lakefile.lean")): return d, ["lake","build"]
     return None, None
 
 env = {**os.environ, "CARGO_TERM_COLOR":"never", "MIX_ENV":"dev", "HEX_OFFLINE":"1"}
