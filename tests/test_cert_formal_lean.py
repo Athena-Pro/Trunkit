@@ -116,13 +116,36 @@ def test_lean_closure_drift_refuted(tmp_path):
 # --- DB-backed: registration + certificate ----------------------------------
 
 def _calx_dsn():
+    """A DEDICATED test DSN, or skip.  Never the resolved default.
+
+    This test registers a claim and mints certificates.  It used to fall back
+    to ``calx_db.resolve_dsn()``, which meant that running the suite without
+    CALX_TEST_DSN set wrote straight into whatever ledger the package resolves
+    to.  It did: 16 ``Erdős test claim <uuid> (lean bridge)`` claims and 32
+    certificates reached the canonical ledger between 2026-07-01 and 07-13.
+
+    Thirteen of them read ``error`` because they point at pytest tmp_path
+    directories that have since been collected -- and the other three read
+    ``valid`` only because ``pytest-17`` happens to still be on disk. pytest
+    keeps the last three temp roots, so the next run of this suite deletes it
+    and flips those three from valid to error. A ledger verdict must not depend
+    on a temp-directory garbage-collection policy.
+
+    The fallback was survivable while ``calx.db.DEFAULT_DSN`` pointed at the
+    stopped 5434 docker instance -- the connect failed and the test skipped.
+    That default was corrected to the canonical 5432 on 2026-07-25, which turns
+    the same code path into a silent write against the real ledger. Hence the
+    hard skip, matching tests/test_cert_lifecycle.py.
+    """
     try:
-        from calx import db as calx_db
-        return (os.environ.get("CALX_TEST_DSN")
-                or os.environ.get("ARITHMETIC_DB_TEST_DSN")
-                or calx_db.resolve_dsn())
+        from calx import db as calx_db  # noqa: F401  (import-guard only)
     except ImportError:  # pragma: no cover
         pytest.skip("calx package not installed")
+    dsn = (os.environ.get("CALX_TEST_DSN")
+           or os.environ.get("ARITHMETIC_DB_TEST_DSN"))
+    if not dsn:
+        pytest.skip("No test DSN provided. Refusing to write to default/production ledger.")
+    return dsn
 
 
 def test_register_lean_artifact_and_certificate(tmp_path):

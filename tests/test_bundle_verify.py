@@ -260,11 +260,19 @@ def test_derivation_valid_premise_keeps_conclusion_valid():
 
 @pytest.fixture()
 def trunk_conn():
+    # Dedicated test DSN or skip -- same guard as tests/conftest.py::calx_dsn
+    # and tests/test_cert_lifecycle.py.  Probe replay is read-only in intent,
+    # but it executes arbitrary probe_sql from a bundle against whatever this
+    # connects to, which is not something to point at the canonical ledger by
+    # default.  The `or calx_db.resolve_dsn()` that used to close this
+    # expression is how test debris reached that ledger elsewhere in the suite.
     dsn = (
         os.environ.get("CALX_TEST_DSN")
         or os.environ.get("ARITHMETIC_DB_TEST_DSN")
-        or calx_db.resolve_dsn()
     )
+    if not dsn:
+        pytest.skip("No CALX_TEST_DSN provided. Refusing to replay probes "
+                    "against the default/production ledger.")
     conn = connect_or_skip(dsn)
     yield conn
     conn.close()
