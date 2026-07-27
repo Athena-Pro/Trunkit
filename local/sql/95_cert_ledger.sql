@@ -324,10 +324,15 @@ WITH
 latest_cert AS (
     SELECT DISTINCT ON (claim_id)
            claim_id, id AS cert_id, seq, status, evidence, valid_under, checked_at,
-           row_hash, prev_hash, premise_hashes, checker_inference_id
+           row_hash, prev_hash, premise_hashes, checker_inference_id, signer_id
       FROM cert.certificate
      WHERE claim_id = ANY(p_claim_ids)
      ORDER BY claim_id, seq DESC
+),
+revocations AS (
+    SELECT r.certificate_id, r.reason, r.revoked_by, r.revoked_at
+      FROM cert.revocation r
+     WHERE r.certificate_id IN (SELECT cert_id FROM latest_cert)
 ),
 latest_witness AS (
     SELECT DISTINCT ON (w.certificate_id)
@@ -363,6 +368,7 @@ SELECT jsonb_build_object(
                                'evidence',       lc.evidence,
                                'valid_under',    lc.valid_under,
                                'checked_at',     lc.checked_at,
+                               'signer_id',      lc.signer_id,
                                'row_hash',       lc.row_hash,
                                'prev_hash',      lc.prev_hash,
                                'premise_hashes', to_jsonb(lc.premise_hashes),
@@ -381,6 +387,11 @@ SELECT jsonb_build_object(
                            THEN jsonb_build_object('kind', a.artifact_kind, 'path', a.path,
                                                    'sha256', a.sha256, 'checker_cmd', a.checker_cmd,
                                                    'registered_at', a.registered_at)
+                           ELSE NULL END,
+            'revocation',  CASE WHEN r.certificate_id IS NOT NULL
+                           THEN jsonb_build_object('reason', r.reason,
+                                                   'revoked_by', r.revoked_by,
+                                                   'revoked_at', r.revoked_at)
                            ELSE NULL END
         )
     )
@@ -390,6 +401,7 @@ JOIN latest_cert  lc ON lc.claim_id = cl.id
 LEFT JOIN latest_witness lw ON lw.certificate_id = lc.cert_id
 LEFT JOIN derivations    d  ON d.conclusion_id   = cl.id
 LEFT JOIN artifacts      a  ON a.claim_id        = cl.id
+LEFT JOIN revocations    r  ON r.certificate_id  = lc.cert_id
 WHERE cl.id = ANY(p_claim_ids);
 $$;
 

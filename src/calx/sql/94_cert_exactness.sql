@@ -45,10 +45,39 @@ BEGIN
     RETURN NEW;
 END $$;
 
-DROP TRIGGER IF EXISTS exactness_shield_trg ON cert.certificate;
-CREATE TRIGGER exactness_shield_trg
+-- TRIGGER NAME IS LOAD-BEARING -- do not rename without reading this.
+--
+-- This trigger MUTATES NEW.status and NEW.evidence. The ledger overlay
+-- (local/sql/95_cert_ledger.sql) installs `cert_certificate_hash`, also BEFORE
+-- INSERT, which computes NEW.row_hash over exactly those two columns.
+-- PostgreSQL fires BEFORE triggers in ALPHABETICAL NAME ORDER, so the shield
+-- must sort before 'cert_certificate_hash' or the hash commits to content that
+-- never reaches disk -- and because cert.certificate is append-only, the
+-- resulting row can never be repaired, only accounted for.
+--
+-- That is not hypothetical: under the old name 'exactness_shield_trg'
+-- ('e' > 'c') every float_heuristic claim whose probe returned TRUE wrote a
+-- certificate that failed cert.verify_chain() forever after, reported as
+-- "content hash mismatch ... (row altered)" -- an accusation of tampering
+-- where there was none. Observed on the canonical ledger 2026-07-25 at
+-- certificates 772 and 787; see local/sql/95b_cert_ledger_shield_scar.sql,
+-- which attests that those two rows are explained by this defect rather than
+-- by alteration, and local/tests/test_cert_ledger_shield_order.py, which
+-- fails if the ordering ever regresses.
+--
+-- The 'aa_' prefix is deliberate and collation-robust: it sorts first under
+-- C and under any ICU/glibc locale, whereas a digit prefix does not portably.
+DROP TRIGGER IF EXISTS exactness_shield_trg    ON cert.certificate;
+DROP TRIGGER IF EXISTS aa_exactness_shield_trg ON cert.certificate;
+CREATE TRIGGER aa_exactness_shield_trg
     BEFORE INSERT ON cert.certificate
     FOR EACH ROW EXECUTE FUNCTION cert.exactness_shield();
+
+COMMENT ON FUNCTION cert.exactness_shield() IS
+    'Exact-domain shield: downgrades a float_heuristic claim''s valid verdict to '
+    'unverified. Mutates NEW.status and NEW.evidence, so its trigger MUST fire '
+    'before the ledger''s cert_certificate_hash -- installed as '
+    'aa_exactness_shield_trg so alphabetical trigger order puts it first.';
 
 -- Convenience view: claims with their domain and latest shielded status.
 CREATE OR REPLACE VIEW cert.exact_standing AS

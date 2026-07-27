@@ -80,7 +80,7 @@ VEX — see Phase 2). Scope: fix-if/when-sensitive.
 
 | CWE | Control | Where |
 |---|---|---|
-| CWE-915 mutable history | append-only `BEFORE UPDATE/DELETE` triggers | step 95 ([`95_cert_ledger.sql`](src/calx/sql/95_cert_ledger.sql)) |
+| CWE-915 mutable history | append-only `BEFORE UPDATE/DELETE` triggers | step 95 ([`95_cert_ledger.sql`](local/sql/95_cert_ledger.sql)); revocations are appended events, never mutations (step 100, [`100_cert_lifecycle.sql`](src/calx/sql/100_cert_lifecycle.sql)) |
 | CWE-20 improper input validation | three-valued "malformed → `unverified`", never a fake verdict | every `cert.kernel_*` ([`94_cert_kernel.sql`](src/calx/sql/94_cert_kernel.sql), [`calx/kernel.py`](src/calx/kernel.py)) |
 | CWE-754 improper check of unusual conditions | empty engine → `unverified` not `refuted`; LEFT JOIN surfaces never-checked claims | steps 40/79 (audited in [`AUDIT.md`](docs/reports/AUDIT.md) §3) |
 
@@ -133,6 +133,14 @@ boundary (the boundary is A1–A3).
 Goal: a record proves **who** asserted it and **when**, and a chain cannot be
 forged or wholesale-substituted.
 
+> **Shipped (step 100, `100_cert_lifecycle.sql`):** certificate *lifecycle* —
+> append-only revocation (`cert.revocation`, `cert.revoke[_claim]`), validity
+> windows carried inside the hash-committed `valid_under`
+> (`SET trunkit.cert_ttl`), and `signer_id` capture from the `trunkit.signer`
+> GUC on certificates and revocations. `signer_id` is an **identity claim in
+> the provenance trail, not a cryptographic proof** — B1 below (key-backed
+> signatures) remains open.
+
 **B1. Per-record signature.** Add `signer_id TEXT`, `signature BYTEA` to
 `cert.certificate`. Sign `row_hash` with Ed25519 at append time (key held by the
 prover, *outside* the DB). `cert.verify_chain` gains a signature-verification
@@ -157,7 +165,8 @@ T" evidence. Aligns Trunkit with SLSA / in-toto / Sigstore supply-chain norms.
 
 - [x] `SECURITY.md` — this document (threat model + CWE register + designs A/B).
 - [ ] Probe-sandbox implementation (design A) — **not started; needs a live DB to test.**
-- [ ] Ledger-signature + anchor cadence (design B) — **not started.**
+- [x] Certificate lifecycle: revocation, validity windows, signer identity (step 100).
+- [ ] Ledger-signature + anchor cadence (design B) — **not started** (signer_id ships without key-backed signatures).
 - [ ] `docs/reports/AUDIT.md` §10 "Adversarial / CWE" — tamper tests:
       forge a chain → must fail signature (B1);
       malicious probe (`pg_read_file`) → must be sandboxed/denied (A);

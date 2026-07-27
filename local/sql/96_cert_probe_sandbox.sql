@@ -114,20 +114,43 @@ CREATE OR REPLACE FUNCTION cert.reject_dangerous_probe() RETURNS trigger
 LANGUAGE plpgsql AS $$
 DECLARE
     bad TEXT;
-    -- case-insensitive denylist of tokens no legitimate read-only probe needs
+    -- Case-insensitive denylist of tokens no legitimate read-only probe needs.
+    --
+    -- Matched on WORD BOUNDARIES, not as substrings -- so the trailing spaces
+    -- these tokens used to carry are gone; trim() below tolerates either form
+    -- if someone re-adds one.
     patterns TEXT[] := ARRAY[
         'pg_read_file', 'pg_read_binary_file', 'pg_ls_dir', 'pg_stat_file',
-        'lo_import', 'lo_export', 'copy ', 'dblink', 'pg_sleep',
+        'lo_import', 'lo_export', 'copy', 'dblink', 'pg_sleep',
         'pg_terminate_backend', 'pg_cancel_backend',
-        'drop ', 'truncate ', 'alter ', 'grant ', 'revoke ',
-        'create ', 'insert ', 'update ', 'delete '
+        'drop', 'truncate', 'alter', 'grant', 'revoke',
+        'create', 'insert', 'update', 'delete'
     ];
 BEGIN
     IF NEW.probe_sql IS NULL THEN
         RETURN NEW;
     END IF;
+    -- Word-boundary match, not position().  The old substring test had a false
+    -- positive AND a false negative, and both were reachable:
+    --
+    --   FALSE POSITIVE  'update ' occurs inside the perfectly read-only
+    --                   `p.status_last_update IS NOT NULL`, so a legitimate
+    --                   SELECT probe was rejected as dangerous.  Found by
+    --                   ErdosIndex claim I9 (2026-07-25).  The class is
+    --                   general: any identifier ending in a denylisted word
+    --                   followed by a space -- last_update, rows_to_delete,
+    --                   date_created is safe only by luck of the 'd'.
+    --   FALSE NEGATIVE  the patterns required a trailing SPACE, so `UPDATE<tab>
+    --                   cert.claim SET ...` and `UPDATE(` slipped straight
+    --                   through the alarm this function exists to be.
+    --
+    -- \m and \M are PostgreSQL word-start / word-end.  Underscore counts as a
+    -- word character, so \mupdate\M does NOT match last_update while it still
+    -- matches UPDATE regardless of the whitespace or punctuation after it.
+    -- Tokens are plain [a-z_] with no regex metacharacters, so no escaping is
+    -- needed; keep it that way, or quote_regex them here.
     FOREACH bad IN ARRAY patterns LOOP
-        IF position(bad IN lower(NEW.probe_sql)) > 0 THEN
+        IF lower(NEW.probe_sql) ~ ('\m' || trim(bad) || '\M') THEN
             RAISE EXCEPTION 'probe rejected: contains forbidden token %', bad
                 USING HINT = 'Read-only SELECT probes only. For untrusted facts '
                              'use cert_kernel data witnesses (cert.submit_proof), '

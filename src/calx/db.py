@@ -4,7 +4,9 @@ DSN resolution order:
   1. explicit ``dsn`` argument
   2. ``CALX_DSN`` env var
   3. the running docker-compose default
-     (postgresql://trunk:trunk@localhost:5434/trunk)
+     (postgresql://trunk:trunk@localhost:5432/trunk -- native and canonical
+     per local/TRUNKIT.md; the 5434 docker containers hold a stale
+     pre-migration schema and are meant to stay stopped)
 
 The database hosts four sibling schemas — ``calx`` (integer/arithmetic data
 and routines), ``curry`` (versioned-fact store), ``kan`` (schema-as-category
@@ -74,7 +76,7 @@ UNIFIED_FILES = _numbered_sql_files()
 # (ALTER ROLE in 00_rehome only affects *future* sessions).
 SEARCH_PATH = "calx, curry, kan, public"
 
-DEFAULT_DSN = "postgresql://trunk:trunk@localhost:5434/trunk"
+DEFAULT_DSN = "postgresql://trunk:trunk@localhost:5432/trunk"
 
 # Without a timeout, an unreachable host hangs the CLI indefinitely.
 CONNECT_TIMEOUT = int(os.environ.get("TRUNKIT_CONNECT_TIMEOUT", "10"))

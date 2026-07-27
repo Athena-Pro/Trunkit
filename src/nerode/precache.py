@@ -57,7 +57,7 @@ from typing import Any
 import psycopg
 
 from nerode.adapters import with_retry
-from nerode.db import resolve_dsn
+from nerode.db import CONNECT_TIMEOUT, resolve_dsn
 
 
 class Precacher:
@@ -86,7 +86,18 @@ class Precacher:
     # ------------------------------------------------------------------
 
     def connect(self) -> None:
-        self._conn = psycopg.connect(self._dsn)
+        # connect_timeout is NOT optional here.  nerode.db already learned this
+        # -- its own connect() passes CONNECT_TIMEOUT with the comment "Without
+        # a timeout, an unreachable host hangs the CLI indefinitely" -- but this
+        # method called psycopg.connect() bare, so it hung instead of failing.
+        #
+        # It bit on 2026-07-26: tests/test_sources.py's
+        # test_envelope_attention_hint_lists_all_keys constructs
+        # Precacher(session_id) with no dsn, which resolves to the default
+        # nerode instance (5435, a stopped container), and the whole pytest run
+        # blocked in select() with no indication of which test was responsible.
+        # Three suite runs went into localising that.
+        self._conn = psycopg.connect(self._dsn, connect_timeout=CONNECT_TIMEOUT)
 
     def disconnect(self) -> None:
         if self._conn:
@@ -149,7 +160,15 @@ class Precacher:
                 %s::jsonb
             )
             """,
-            (key, length, force_rebuild, json.dumps(value)),
+            # default=str so DATE / TIMESTAMP / NUMERIC / UUID values coming
+            # straight out of a query are storable.  Without it, store() raises
+            # "Object of type date is not JSON serializable" on the most obvious
+            # use of this class -- caching the result of a SELECT -- and every
+            # caller has to hand-serialise its rows first.  str() is lossy in
+            # principle; it is the right trade here because the envelope is a
+            # briefing to be read, and a date rendered '2026-07-25' is exactly
+            # what a reader wants.
+            (key, length, force_rebuild, json.dumps(value, default=str)),
         )
         self._conn.execute(
             "SELECT nerode.tag_cache_key(%s, %s)",
@@ -182,9 +201,12 @@ class Precacher:
     def close(self, *, attention_hint: str | None = None, cert_root: str | None = None) -> dict:
         """Call nerode.close_session(), commit, and return the envelope dict.
 
-        *cert_root* (or the value passed to __init__) is embedded in the envelope
-        as ``cert_ledger_root`` — the Trunkit cert.ledger_root() this handoff was
-        packed against — entangling the agent handoff with the proof ledger.
+        *cert_root* (or the value passed to __init__) is the Trunkit
+        cert.ledger_root() this handoff was packed against.  It is recorded in
+        the CLOSING CERTIFICATE's ``valid_under`` as ``trunkit.cert_ledger_root``
+        — not as a top-level envelope field — and is reachable from the envelope
+        via ``cert_bundle_id``.  That entangles the agent handoff with the proof
+        ledger, and does so inside the ledger's own hash chain.
         """
         if self._conn is None:
             raise RuntimeError("Precacher.close() called before connect()")
@@ -194,7 +216,18 @@ class Precacher:
             detail["attention_hint"] = attention_hint
         root = cert_root or self._cert_root
         if root:
-            detail["cert_ledger_root"] = root
+            # MUST go under 'trunkit'.  nerode.close_session() honours exactly
+            # three p_detail keys -- cache_keys, attention_hint, trunkit -- and
+            # silently drops everything else.  This previously set a top-level
+            # 'cert_ledger_root', which the docstring claimed was "embedded in
+            # the envelope" and which the SQL threw away without complaint, so
+            # every envelope packed to date carried no ledger binding at all.
+            #
+            # Via 'trunkit' the root lands in the closing certificate's
+            # valid_under, reachable from the envelope through cert_bundle_id --
+            # which is better than a bare envelope field, because it is then
+            # itself covered by the ledger's hash chain.
+            detail["trunkit"] = {"cert_ledger_root": root}
 
         row = self._conn.execute(
             "SELECT nerode.close_session(%s, %s::jsonb)",
@@ -242,7 +275,10 @@ class Precacher:
 
         Returns the context object (resolved values, DFA context, cert status).
         """
-        conn = psycopg.connect(dsn or resolve_dsn())
+        # Same reasoning as connect(): Model B is often a fresh process with no
+        # idea whether the handoff DB is up, and a bare connect() would hang it
+        # on the one code path whose entire purpose is a fast cold start.
+        conn = psycopg.connect(dsn or resolve_dsn(), connect_timeout=CONNECT_TIMEOUT)
         try:
             row = conn.execute(
                 "SELECT nerode.open_session(%s::jsonb, %s)",
