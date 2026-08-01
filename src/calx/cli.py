@@ -386,9 +386,33 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 
 
 def _cmd_reset(args: argparse.Namespace) -> int:
+    """Drop the calx integer tables.
+
+    Schema-qualified on purpose. The unqualified form resolved through
+    search_path, which is only pinned for the ``trunk`` role (00_rehome's
+    ``ALTER ROLE``); connecting as any other role — the common case with an
+    explicit ``--dsn`` — left search_path at ``"$user", public`` while the
+    tables live in ``calx``. ``IF EXISTS`` then swallowed the miss and reset
+    reported success while dropping nothing, so the next ``generate`` still
+    collided with the rows reset claimed to have removed.
+    """
+    tables = ("factorizations", "primes", "integers")
     with db.connect(args.dsn) as conn, conn.cursor() as cur:
-        cur.execute("DROP TABLE IF EXISTS factorizations, primes, integers CASCADE")
-    print("dropped factorizations, primes, integers")
+        cur.execute(
+            "SELECT tablename FROM pg_tables"
+            " WHERE schemaname = 'calx' AND tablename = ANY(%s)",
+            (list(tables),),
+        )
+        present = {r[0] for r in cur.fetchall()}
+        if not present:
+            print("  nothing to drop: no calx.{factorizations,primes,integers} tables")
+            return 0
+        cur.execute(
+            "DROP TABLE IF EXISTS "
+            + ", ".join(f"calx.{t}" for t in tables)
+            + " CASCADE"
+        )
+    print(f"  dropped {', '.join(f'calx.{t}' for t in sorted(present))}")
     return 0
 
 
