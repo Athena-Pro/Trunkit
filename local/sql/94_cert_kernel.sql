@@ -617,13 +617,14 @@ BEGIN
         END IF;
     END;
 
+    -- Transitive since step 102: every reachable premise must stand
+    -- effectively valid (revocation/expiry propagates; cycles fail).
     IF EXISTS (SELECT 1 FROM cert.derivation WHERE conclusion_id = p_claim_id) THEN
         DECLARE
-            v_deriv_ok BOOLEAN; v_deriv_ev JSONB; v_deriv_id BIGINT;
+            v_deriv_ok BOOLEAN; v_deriv_ev JSONB;
         BEGIN
-            SELECT id INTO v_deriv_id FROM cert.derivation WHERE conclusion_id = p_claim_id LIMIT 1;
             SELECT d.ok, d.evidence INTO v_deriv_ok, v_deriv_ev
-              FROM cert.derivation_valid(v_deriv_id) d;
+              FROM cert.derivation_valid_deep(p_claim_id) d;
             v_ok := COALESCE(v_ok, TRUE) AND COALESCE(v_deriv_ok, TRUE);
             v_ev := v_ev || jsonb_build_object('derivation', v_deriv_ev);
         END;
@@ -637,8 +638,8 @@ COMMENT ON FUNCTION cert.verify(BIGINT) IS
     'Side-effect-free re-verification. comp_sql/struct_kan replay probe_sql; '
     'cert_kernel (and any witness carrying a registered kernel schema) is '
     're-checked by an independent kernel via cert.kernel_verify; otherwise the '
-    'stored witness is returned. Validates derivation premises when present. '
-    'Produces no INSERTs.';
+    'stored witness is returned. Validates ALL transitive derivation premises '
+    'when present (cert.derivation_valid_deep). Produces no INSERTs.';
 
 -- ---------------------------------------------------------------------------
 -- 6. worked examples (checking is a harness step: tools/cert_kernel.py --write)

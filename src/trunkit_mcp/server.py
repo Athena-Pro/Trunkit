@@ -44,6 +44,7 @@ if _src and _src not in sys.path:
 
 # ── Import trunkit layers (soft-fail for optional DB layer) ─────────────────
 import calx.arith as _arith  # noqa: E402
+import calx.congruence as _congruence  # noqa: E402
 import calx.holographic as _holographic  # noqa: E402
 import calx.morphism as _morphism  # noqa: E402
 import calx.recurrence as _recurrence  # noqa: E402
@@ -517,6 +518,45 @@ def arith_verify(phi_json: str, interp_json: str | None = None, x: int = 0) -> d
         "verdict": "valid" if r == 0 else "refuted",
         "residual": str(r),
         "x": x,
+    }
+
+
+@mcp.tool()
+def congruence_verify(remainders_json: str, moduli_json: str, x: int) -> dict[str, Any]:
+    """Verify a Chinese Remainder Theorem certificate: x is the CRT solution.
+
+    ``remainders_json`` / ``moduli_json`` — JSON integer lists of equal
+    length, one congruence x ≡ r_i (mod m_i) per position. Moduli must be
+    pairwise coprime and positive.
+
+    Reconstructs the unique solution in [0, product(moduli)) via CRT (exact
+    integer arithmetic, calx.congruence) and compares to ``x`` mod that
+    product. Non-coprime moduli refute rather than error — mirrors
+    cert.congruence_matches (101). No database.
+    """
+    try:
+        remainders = json.loads(remainders_json)
+        moduli = json.loads(moduli_json)
+    except json.JSONDecodeError as exc:
+        return {"verdict": "unverified", "error": f"invalid JSON: {exc}"}
+    if not isinstance(remainders, list) or not isinstance(moduli, list):
+        return {"verdict": "unverified", "error": "remainders and moduli must be lists"}
+    if len(remainders) != len(moduli) or not moduli:
+        return {"verdict": "unverified",
+                "error": "remainders and moduli must be non-empty and the same length"}
+    try:
+        solution = _congruence.crt(remainders, moduli)
+    except (ValueError, TypeError) as exc:
+        return {"verdict": "refuted", "reason": str(exc)}
+    modulus = 1
+    for m in moduli:
+        modulus *= m
+    ok = solution == x % modulus
+    return {
+        "verdict": "valid" if ok else "refuted",
+        "solution": solution,
+        "modulus": modulus,
+        "congruences": len(moduli),
     }
 
 

@@ -204,17 +204,18 @@ BEGIN
         v_ev := v_ev || jsonb_build_object('lifecycle', v_life || '{"state":"revoked"}'::jsonb);
     END IF;
 
+    -- Transitive since step 102: EVERY reachable premise must stand
+    -- effectively valid, so revocation/expiry propagates down the proof DAG
+    -- and circular support fails (cycle_detected). derivation_valid_deep is
+    -- defined in 102; plpgsql resolves it at call time, so the bootstrap
+    -- ordering (100 before 102) is safe.
     IF EXISTS (SELECT 1 FROM cert.derivation WHERE conclusion_id = p_claim_id) THEN
         DECLARE
             v_deriv_ok   BOOLEAN;
             v_deriv_ev   JSONB;
-            v_deriv_id   BIGINT;
         BEGIN
-            SELECT id INTO v_deriv_id
-              FROM cert.derivation WHERE conclusion_id = p_claim_id LIMIT 1;
-
             SELECT d.ok, d.evidence INTO v_deriv_ok, v_deriv_ev
-              FROM cert.derivation_valid(v_deriv_id) d;
+              FROM cert.derivation_valid_deep(p_claim_id) d;
 
             v_ok := COALESCE(v_ok, TRUE) AND COALESCE(v_deriv_ok, TRUE);
             v_ev := v_ev || jsonb_build_object('derivation', v_deriv_ev);
@@ -263,6 +264,26 @@ revocations AS (
     SELECT r.certificate_id, r.reason, r.revoked_by, r.revoked_at
       FROM cert.revocation r
       JOIN latest_cert lc ON lc.cert_id = r.certificate_id
+),
+-- Every seq, not just the latest. `certificate` above carries the newest one
+-- and keeps its v1 shape (consumers and the v2 hash preimage both depend on
+-- that); this is the audit trail beside it. Without it a claim re-checked
+-- under changed conditions -- unverified, then valid once the operational set
+-- grew -- exported as though it had only ever been valid: the ledger retained
+-- the history, the portable bundle silently dropped it.
+cert_history AS (
+    SELECT claim_id,
+           jsonb_agg(jsonb_build_object(
+               'seq',         seq,
+               'status',      status,
+               'evidence',    evidence,
+               'valid_under', valid_under,
+               'checked_at',  checked_at,
+               'signer_id',   signer_id
+           ) ORDER BY seq) AS history
+      FROM cert.certificate
+     WHERE claim_id = ANY(p_claim_ids)
+     GROUP BY claim_id
 )
 SELECT jsonb_build_object(
     'trunk_bundle_version', 1,
@@ -278,6 +299,7 @@ SELECT jsonb_build_object(
                                'checked_at',  lc.checked_at,
                                'signer_id',   lc.signer_id
                            ),
+            'certificate_history', COALESCE(ch.history, '[]'::jsonb),
             'witness',     CASE WHEN lw.witness_kind IS NOT NULL
                            THEN jsonb_build_object('kind', lw.witness_kind, 'body', lw.witness_body)
                            ELSE NULL END,
@@ -313,6 +335,7 @@ LEFT JOIN latest_witness lw ON lw.certificate_id = lc.cert_id
 LEFT JOIN derivations     d  ON d.conclusion_id   = cl.id
 LEFT JOIN artifacts       a  ON a.claim_id        = cl.id
 LEFT JOIN revocations     r  ON r.certificate_id  = lc.cert_id
+LEFT JOIN cert_history    ch ON ch.claim_id       = cl.id
 WHERE cl.id = ANY(p_claim_ids);
 $$ LANGUAGE sql STABLE;
 
