@@ -78,8 +78,8 @@ def cmd_build(args: argparse.Namespace) -> None:
             print(f"automaton id: {auto_id}")
             claim_id: int = conn.execute(
                 "SELECT nerode.certify(%s,'from_regex',"
-                "jsonb_build_object('pattern',%s),'construction_record',"
-                "jsonb_build_object('pattern',%s,'automaton_id',%s))",
+                "jsonb_build_object('pattern',%s::text),'construction_record',"
+                "jsonb_build_object('pattern',%s::text,'automaton_id',%s::int))",
                 (auto_id, args.regex, args.regex, auto_id),
             ).fetchone()[0]
             print(f"cert claim id: {claim_id}")
