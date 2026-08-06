@@ -85,3 +85,20 @@ def test_named_automaton(conn):
         "SELECT name FROM nerode.automata WHERE id = %s", (aid,)
     ).fetchone()
     assert row[0] == "star_a_b"
+
+
+def test_certify_from_regex(conn):
+    # Regression: `nerode build --write` calls this exact statement (see
+    # cmd_build in nerode/cli.py). The two %s parameters landing inside
+    # jsonb_build_object(...) must be cast (::text / ::int) — left bare,
+    # Postgres cannot infer a type for a bind parameter whose only context
+    # is a variadic "any" argument, and raises
+    # "could not determine data type of parameter $2".
+    aid = _build(conn, "(a|b)*abb")
+    claim_id = conn.execute(
+        "SELECT nerode.certify(%s,'from_regex',"
+        "jsonb_build_object('pattern',%s::text),'construction_record',"
+        "jsonb_build_object('pattern',%s::text,'automaton_id',%s::int))",
+        (aid, "(a|b)*abb", "(a|b)*abb", aid),
+    ).fetchone()[0]
+    assert claim_id is not None
