@@ -13,13 +13,29 @@ version-sensitive. These names target the Lean 4 line pinned in the project's
 For the target declaration it:
   1. resolves the name (missing ⇒ exit 2),
   2. collects the transitive axiom set (the same data `#print axioms` shows),
-  3. prints a one-line JSON verdict to stdout:
-       {"decl":"…","type":"…","axioms":[…],"uses_sorry":false,"ok":true}
-  4. exits 0 iff  (¬uses_sorry) ∧ (axioms ⊆ ALLOWED).
+  3. buckets it (docs/DESIGN_TOOL_ATTESTATION_TIER.md):
+       core       — the ALLOWED trusted set,
+       attested   — tool-attestation axioms matching the naming schema
+                    `trunkit_att_<claim_id>_<sha256_16>` (top-level names
+                    only; must stay in sync with
+                    cert.attestation_axiom_name in 104_cert_attestation.sql),
+       disallowed — everything else (always includes any sorry variant),
+  4. prints a one-line JSON verdict to stdout:
+       {"decl":"…","type":"…","axioms":[…],
+        "buckets":{"core":[…],"attested":[…],"disallowed":[…]},
+        "allow_attested":false,"uses_sorry":false,"ok":true}
+  5. exits 0 iff  (¬uses_sorry) ∧ disallowed = ∅
+                ∧ (attested = ∅ ∨ --allow-attested was given).
+
+Without `--allow-attested` (or LEAN_AUDIT_ALLOW_ATTESTED=1) the contract is
+exactly the historical one: axioms ⊆ ALLOWED. A kernel-pure (T0) claim can
+therefore never silently acquire empirical dependencies.
 
 ALLOWED defaults to Mathlib's three trusted axioms. `sorryAx` is always a
 failure. `Lean.ofReduceBool` (the native_decide trust root) is NOT in ALLOWED by
 default; set LEAN_AUDIT_ALLOW_NATIVE=1 to admit it (recorded by the harness).
+
+`--selftest` runs the naming-schema matcher unit checks and exits (no imports).
 
 `lake build` succeeding only proves the project typechecks; this is the gate
 that proves the *declaration* is sorry-free and rests on trusted axioms.
@@ -38,6 +54,54 @@ def asModuleName : Name → Name
   | .str p s   => .str (asModuleName p) s
   | .num p n   => .str (asModuleName p) (toString n)
 
+/-- Tool-attestation axiom naming schema: a TOP-LEVEL name of the form
+`trunkit_att_<claim_id digits>_<exactly 16 lowercase hex>`. The claim id and
+statement-hash prefix make the name a foreign key into `cert.attestation`;
+namespaced names never match (attestation axioms are emitted top-level). -/
+def isAttestationAxiom (n : Name) : Bool :=
+  match n with
+  | .str .anonymous s =>
+      -- Split the WHOLE atom rather than `(s.drop pre.length)`: as of Lean
+      -- 4.28 `String.drop` returns a `String.Slice`, and `String.Slice` has
+      -- no `splitOn`, so the old spelling stopped compiling and took claim
+      -- 373 down with it. Putting the prefix in the pattern also removes the
+      -- second reading of it -- startsWith and drop had to agree on the same
+      -- literal, and nothing enforced that they did.
+      match s.splitOn "_" with
+      | ["trunkit", "att", claimId, hex] =>
+          claimId.length > 0 && claimId.all Char.isDigit
+            && hex.length == 16
+            && hex.all (fun c => c.isDigit || ('a' ≤ c && c ≤ 'f'))
+      | _ => false
+  | _ => false
+
+def selftestCases : List (String × Bool) :=
+  [ ("trunkit_att_42_0123456789abcdef", true),
+    ("trunkit_att_9000000_00000000000000ff", true),
+    ("trunkit_att_42_0123456789ABCDEF", false),  -- uppercase hex
+    ("trunkit_att_42_0123456789abcde",  false),  -- 15 hex chars
+    ("trunkit_att_42_0123456789abcdef0", false), -- 17 hex chars
+    ("trunkit_att__0123456789abcdef",   false),  -- empty claim id
+    ("trunkit_att_x2_0123456789abcdef", false),  -- non-digit claim id
+    ("trunkit_att_42_0123456789abcdxy", false),  -- non-hex suffix
+    ("lift_deadbeef_argmax",            false),  -- EG-VAR's schema, not ours
+    ("sorryAx",                         false),
+    ("propext",                         false) ]
+
+def runSelftest : IO UInt32 := do
+  let mut failures := 0
+  for (s, expected) in selftestCases do
+    let got := isAttestationAxiom (.str .anonymous s)
+    if got != expected then
+      failures := failures + 1
+      IO.eprintln s!"selftest FAIL: {s} → {got}, expected {expected}"
+  -- namespaced names must not match even with a schema-shaped atom
+  if isAttestationAxiom (.str (.str .anonymous "Foo") "trunkit_att_1_0123456789abcdef") then
+    failures := failures + 1
+    IO.eprintln "selftest FAIL: namespaced name matched"
+  IO.println <| "{\"selftest\":\"AxiomAudit\",\"cases\":" ++ toString (selftestCases.length + 1) ++ ",\"failures\":" ++ toString failures ++ "}"
+  return (if failures == 0 then 0 else 1)
+
 def jsonEscape (s : String) : String :=
   s.foldl (init := "") fun acc c =>
     acc ++ match c with
@@ -49,9 +113,13 @@ def jsonEscape (s : String) : String :=
       | _    => String.singleton c
 
 unsafe def main (args : List String) : IO UInt32 := do
-  let (modStr, declStr) ← match args with
+  if args.contains "--selftest" then
+    return (← runSelftest)
+  let allowAttested := args.contains "--allow-attested"
+    || (← IO.getEnv "LEAN_AUDIT_ALLOW_ATTESTED").isSome
+  let (modStr, declStr) ← match args.filter (fun a => !a.startsWith "--") with
     | [m, d] => pure (m, d)
-    | _ => do IO.eprintln "usage: AxiomAudit <Module> <Decl>"; return 2
+    | _ => do IO.eprintln "usage: AxiomAudit <Module> <Decl> [--allow-attested]"; return 2
   let allowNative := (← IO.getEnv "LEAN_AUDIT_ALLOW_NATIVE").isSome
   let allowed := if allowNative then baseAllowed ++ [``Lean.ofReduceBool] else baseAllowed
 
@@ -69,20 +137,29 @@ unsafe def main (args : List String) : IO UInt32 := do
     let (_, s) := ((CollectAxioms.collect declName).run env).run {}
     let axioms := s.axioms
     let usesSorry := axioms.contains ``sorryAx
-    let disallowed := axioms.filter (fun a => !(allowed.contains a))
+    let core       := axioms.filter (fun a => allowed.contains a)
+    let attested   := axioms.filter (fun a =>
+      !(allowed.contains a) && isAttestationAxiom a)
+    let disallowed := axioms.filter (fun a =>
+      !(allowed.contains a) && !(isAttestationAxiom a))
     let ok := (¬ usesSorry) && disallowed.isEmpty
+      && (attested.isEmpty || allowAttested)
     let typeStr ←
       try
         let (fmt, _) ← ((PrettyPrinter.ppExpr ci.type).run').toIO
           { fileName := "<AxiomAudit>", fileMap := default } { env := env }
         pure (toString fmt)
       catch _ => pure "<unprintable>"
-    let axJson := String.intercalate ","
-      (axioms.toList.map (fun n => "\"" ++ jsonEscape (toString n) ++ "\""))
+    let nameArr := fun (ns : Array Name) => String.intercalate ","
+      (ns.toList.map (fun n => "\"" ++ jsonEscape (toString n) ++ "\""))
     IO.println <| String.intercalate "" [
       "{\"decl\":\"", jsonEscape declStr, "\"",
       ",\"type\":\"", jsonEscape typeStr, "\"",
-      ",\"axioms\":[", axJson, "]",
+      ",\"axioms\":[", nameArr axioms, "]",
+      ",\"buckets\":{\"core\":[", nameArr core,
+      "],\"attested\":[", nameArr attested,
+      "],\"disallowed\":[", nameArr disallowed, "]}",
+      ",\"allow_attested\":", (if allowAttested then "true" else "false"),
       ",\"uses_sorry\":", (if usesSorry then "true" else "false"),
       ",\"ok\":", (if ok then "true" else "false"), "}"
     ]

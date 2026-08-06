@@ -50,17 +50,46 @@ def _seed_integers(conn: Connection, limit: int) -> None:
 
 
 def _seed_primes_via_copy(conn: Connection, limit: int) -> None:
-    """Stream primes from primesieve into ``primes`` via COPY, then flip ``is_prime``."""
+    """Stream primes from primesieve into ``primes`` via COPY, then flip ``is_prime``.
+
+    COPY lands in a TEMP staging table, not ``primes`` directly: COPY has no
+    ``ON CONFLICT`` clause, so copying straight into ``primes`` makes the whole
+    command all-or-nothing — re-running it, or raising ``--limit`` against an
+    already-populated database, dies on ``(p)=(2)`` before reaching a single new
+    prime. Staging keeps COPY's speed and makes the seed incremental.
+
+    ``discovered_order`` is deterministic (the sieve always ranks 2→1, 3→2, …),
+    so a re-run agrees with the stored ranks on the overlapping prefix and only
+    the new tail is inserted. The untargeted ``ON CONFLICT DO NOTHING`` covers
+    both unique constraints on the table (``p`` and ``discovered_order``).
+    """
     with conn.cursor() as cur:
+        cur.execute(
+            """
+            CREATE TEMP TABLE _primes_stage (
+                p                BIGINT,
+                discovered_order BIGINT
+            ) ON COMMIT DROP
+            """
+        )
         with cur.copy(
-            "COPY primes (p, discovered_order) FROM STDIN WITH (FORMAT TEXT)"
+            "COPY _primes_stage (p, discovered_order) FROM STDIN WITH (FORMAT TEXT)"
         ) as copy:
             for rank, p in enumerate(primesieve.iter_primes(limit), start=1):
                 copy.write_row((p, rank))
 
         cur.execute(
             """
+            INSERT INTO primes (p, discovered_order)
+            SELECT p, discovered_order FROM _primes_stage
+            ORDER BY discovered_order
+            ON CONFLICT DO NOTHING
+            """
+        )
+
+        cur.execute(
+            """
             UPDATE integers SET is_prime = TRUE
-            WHERE n IN (SELECT p FROM primes)
+            WHERE n IN (SELECT p FROM primes) AND NOT is_prime
             """
         )

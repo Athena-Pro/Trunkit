@@ -11,6 +11,8 @@ Consumer tools (read-only, always available):
   morphism_verify    — re-check an exact sequence-morphism certificate (95)
   commitment_verify  — re-check a holographic Merkle commitment (96)
   arith_verify       — re-check an arithmetised claim's residual (97)
+  congruence_verify  — re-check a CRT congruence certificate (101)
+  bound_verify       — re-check a numeric-bound set's order structure (105)
 
 Prover tools (require TRUNKIT_ALLOW_WRITE=1 in env):
   claim_check        — re-run and record a certificate
@@ -31,6 +33,7 @@ import pathlib
 import sys
 import textwrap
 import traceback
+from decimal import Decimal as _decimal_cls
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -44,6 +47,8 @@ if _src and _src not in sys.path:
 
 # ── Import trunkit layers (soft-fail for optional DB layer) ─────────────────
 import calx.arith as _arith  # noqa: E402
+import calx.bound as _bound  # noqa: E402
+import calx.congruence as _congruence  # noqa: E402
 import calx.holographic as _holographic  # noqa: E402
 import calx.morphism as _morphism  # noqa: E402
 import calx.recurrence as _recurrence  # noqa: E402
@@ -84,6 +89,8 @@ mcp = FastMCP(
           morphism_verify   — exact affine/scale/index-shift map between sequences
           commitment_verify — holographic Merkle commitment against a carried root
           arith_verify      — arithmetised first-order claim (residual vanishes)
+          congruence_verify — CRT system reconstructs the claimed solution
+          bound_verify      — numeric bounds: consistency, frontier, optimality
 
         Prover tools (only when TRUNKIT_ALLOW_WRITE=1):
           claim_check     — re-run and record a certificate
@@ -518,6 +525,104 @@ def arith_verify(phi_json: str, interp_json: str | None = None, x: int = 0) -> d
         "residual": str(r),
         "x": x,
     }
+
+
+@mcp.tool()
+def congruence_verify(remainders_json: str, moduli_json: str, x: int) -> dict[str, Any]:
+    """Verify a Chinese Remainder Theorem certificate: x is the CRT solution.
+
+    ``remainders_json`` / ``moduli_json`` — JSON integer lists of equal
+    length, one congruence x ≡ r_i (mod m_i) per position. Moduli must be
+    pairwise coprime and positive.
+
+    Reconstructs the unique solution in [0, product(moduli)) via CRT (exact
+    integer arithmetic, calx.congruence) and compares to ``x`` mod that
+    product. Non-coprime moduli refute rather than error — mirrors
+    cert.congruence_matches (101). No database.
+    """
+    try:
+        remainders = json.loads(remainders_json)
+        moduli = json.loads(moduli_json)
+    except json.JSONDecodeError as exc:
+        return {"verdict": "unverified", "error": f"invalid JSON: {exc}"}
+    if not isinstance(remainders, list) or not isinstance(moduli, list):
+        return {"verdict": "unverified", "error": "remainders and moduli must be lists"}
+    if len(remainders) != len(moduli) or not moduli:
+        return {"verdict": "unverified",
+                "error": "remainders and moduli must be non-empty and the same length"}
+    try:
+        solution = _congruence.crt(remainders, moduli)
+    except (ValueError, TypeError) as exc:
+        return {"verdict": "refuted", "reason": str(exc)}
+    modulus = 1
+    for m in moduli:
+        modulus *= m
+    ok = solution == x % modulus
+    return {
+        "verdict": "valid" if ok else "refuted",
+        "solution": solution,
+        "modulus": modulus,
+        "congruences": len(moduli),
+    }
+
+
+@mcp.tool()
+def bound_verify(
+    bounds_json: str,
+    optimal_bound_id: int | None = None,
+    assume_json: str | None = None,
+) -> dict[str, Any]:
+    """Verify a numeric-bound set: consistency, frontier, enclosure, optimality.
+
+    ``bounds_json`` — a JSON list of bounds on ONE quantity, each
+    {"id":.., "direction":"upper"|"lower", "value":.., "is_strict":false,
+     "hypotheses":[..], "source":"..", "claim_id":.., "attained_by":..,
+     "claim_standing":".."}. Give ``value`` as a string ("0.1") to keep it
+    exact. ``optimal_bound_id`` — also judge that bound's optimality.
+    ``assume_json`` — JSON list of hypotheses the enclosure may assume
+    (default: unconditional).
+
+    Re-derives the partial order of 105 in exact Decimal (calx.bound): a
+    bound dominates another only if it is at least as tight AND assumes no
+    more, so a sharper conditional bound supersedes nothing. A lower bound
+    above an upper one refutes — the pair cannot both hold, and both are
+    named. Optimality reaches "valid" only when the bound is undominated,
+    attained, and carries a truth-claim whose standing is valid; undominated
+    alone is "best known on record", which is unverified. Whether a bound is
+    TRUE is a separate claim and is not judged here. No database.
+    """
+    try:
+        raw = json.loads(bounds_json, parse_float=_decimal_cls)
+        assume = json.loads(assume_json) if assume_json else []
+    except json.JSONDecodeError as exc:
+        return {"verdict": "unverified", "error": f"invalid JSON: {exc}"}
+    if not isinstance(assume, list):
+        return {"verdict": "unverified", "error": "assume_json must be a JSON list"}
+    try:
+        bounds = _bound.parse(raw)
+    except ValueError as exc:
+        return {"verdict": "unverified", "error": str(exc)}
+    if not bounds:
+        return {"verdict": "unverified", "error": "no bounds supplied"}
+
+    ok, evidence = _bound.consistent(bounds)
+    result: dict[str, Any] = {
+        "verdict": _ok_label(ok),
+        "consistent": ok,
+        "evidence": evidence,
+        "frontier": _bound.frontier(bounds),
+        "enclosure": _bound.enclosure(bounds, [str(a) for a in assume]),
+        "bounds": len(bounds),
+    }
+    if not ok:
+        return result   # a collision settles it; optimality over an empty
+                        # interval would be meaningless
+
+    if optimal_bound_id is not None:
+        opt_ok, opt_ev = _bound.optimal(optimal_bound_id, bounds)
+        result["verdict"] = _ok_label(opt_ok)
+        result["optimal"] = {"ok": opt_ok, "evidence": opt_ev}
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════

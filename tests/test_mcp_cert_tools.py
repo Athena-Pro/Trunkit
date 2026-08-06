@@ -180,6 +180,77 @@ def test_tool_arith_verify():
     assert server.arith_verify('{"op":"Exec","args":[]}')["verdict"] == "unverified"
 
 
+# The bend-and-break constants of arXiv:2607.06447 §3.1, plus one conditional
+# bound so the frontier has something incomparable on it.
+_BOUNDS = json.dumps([
+    {"id": 1, "direction": "upper", "value": "6", "source": "Shepherd-Barron"},
+    {"id": 2, "direction": "upper", "value": "4", "source": "Bogomolov-McQuillan"},
+    {"id": 3, "direction": "upper", "value": "3", "source": "JLR"},
+    {"id": 4, "direction": "upper", "value": "2.5", "hypotheses": ["GRH"]},
+    {"id": 5, "direction": "lower", "value": "1"},
+])
+
+
+def test_tool_bound_verify_frontier_and_enclosure():
+    out = server.bound_verify(_BOUNDS)
+    assert out["verdict"] == "valid"
+    # 3 is the best unconditional, 4 is sharper but assumes more: incomparable.
+    assert sorted(r["bound_id"] for r in out["frontier"]) == [3, 4, 5]
+    # Unconditional enclosure ignores the GRH bound.
+    assert out["enclosure"]["upper_value"] == "3"
+    assert server.bound_verify(_BOUNDS, assume_json='["GRH"]')["enclosure"][
+        "upper_value"] == "2.5"
+
+
+def test_tool_bound_verify_refutes_a_collision_and_names_both():
+    colliding = json.dumps([
+        {"id": 1, "direction": "lower", "value": "5", "source": "a transcription"},
+        {"id": 2, "direction": "upper", "value": "3", "source": "the literature"},
+    ])
+    out = server.bound_verify(colliding)
+    assert out["verdict"] == "refuted"
+    conflict = out["evidence"]["conflicts"][0]
+    assert (conflict["lower_bound_id"], conflict["upper_bound_id"]) == (1, 2)
+
+
+def test_tool_bound_verify_optimality_is_three_valued():
+    # Dominated -> refuted, and no trust in the producer is needed to say so.
+    assert server.bound_verify(_BOUNDS, optimal_bound_id=2)["verdict"] == "refuted"
+    # Undominated but unattained -> "best known on record", not optimal.
+    out = server.bound_verify(_BOUNDS, optimal_bound_id=3)
+    assert out["verdict"] == "unverified"
+    assert out["optimal"]["evidence"]["status"] == "best known on record"
+
+
+def test_tool_bound_verify_reaches_optimal_only_with_carried_standing():
+    attained = json.loads(_BOUNDS)
+    attained[2] |= {"claim_id": 77, "attained_by": {"construction": "r+1"}}
+    assert server.bound_verify(json.dumps(attained),
+                               optimal_bound_id=3)["verdict"] == "unverified"
+    attained[2] |= {"claim_standing": "valid"}
+    assert server.bound_verify(json.dumps(attained),
+                               optimal_bound_id=3)["verdict"] == "valid"
+    attained[2] |= {"claim_standing": "revoked"}
+    assert server.bound_verify(json.dumps(attained),
+                               optimal_bound_id=3)["verdict"] == "unverified"
+
+
+def test_tool_bound_verify_keeps_decimal_values_exact():
+    out = server.bound_verify(json.dumps([
+        {"id": 1, "direction": "lower", "value": 0.1},
+        {"id": 2, "direction": "upper", "value": 0.3},
+    ]))
+    assert out["enclosure"]["width"] == "0.2"
+
+
+def test_tool_bound_verify_is_honest_on_garbage():
+    assert server.bound_verify("not json")["verdict"] == "unverified"
+    assert server.bound_verify("[]")["verdict"] == "unverified"
+    assert server.bound_verify('[{"id": 1, "direction": "sideways", "value": 1}]'
+                               )["verdict"] == "unverified"
+    assert server.bound_verify(_BOUNDS, assume_json='"GRH"')["verdict"] == "unverified"
+
+
 # ── SQL equivalence (byte-identity with 96) ──────────────────────────────────
 
 

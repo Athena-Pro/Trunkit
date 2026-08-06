@@ -144,30 +144,45 @@ AS $$
 DECLARE
     p   BIGINT;
     pk  BIGINT;
+    lo  BIGINT;   -- high-water mark: n <= lo is already fully factorized
 BEGIN
+    -- Incremental high-water mark. This procedure builds each n's full prime
+    -- signature in one pass (layer-1 insert, then log_p(N) exponent bumps), so
+    -- any n already present in `factorizations` is complete and must not be
+    -- touched again — re-running the layer-1 INSERT would collide on the PK,
+    -- and re-running the bump UPDATEs would double-count exponents. Both make
+    -- `generate` non-re-runnable. Gating every progression to start strictly
+    -- above `lo` skips settled rows and factorizes only the freshly-seeded
+    -- tail, which is what lets `generate --limit N` be raised or re-run against
+    -- a populated database. lo = 0 on a fresh DB reproduces the original full
+    -- build exactly.
+    SELECT COALESCE(MAX(n), 0) INTO lo FROM factorizations;
+
     -- ── Phase 4: Factorizations ──────────────────────────────────────────────
 
-    RAISE NOTICE '[4/5] Building factorizations via layered progressions  (%)',
-        clock_timestamp();
+    RAISE NOTICE '[4/5] Building factorizations via layered progressions  (from n>%)  (%)',
+        lo, clock_timestamp();
 
     FOR p IN SELECT pr.p FROM primes pr WHERE pr.p <= lim ORDER BY pr.p LOOP
 
-        -- Layer k = 1: every multiple of p gets exponent 1
+        -- Layer k = 1: every NEW multiple of p (n > lo) gets exponent 1.
+        -- (lo/p + 1)*p is the first multiple of p strictly greater than lo.
         INSERT INTO factorizations (n, prime, exponent)
         SELECT s, p, 1
-        FROM   generate_series(p, lim, p) AS s;
+        FROM   generate_series((lo / p + 1) * p, lim, p) AS s;
 
-        -- Layers k = 2, 3, ...: each multiple of p^k bumps exponent by 1.
+        -- Layers k = 2, 3, ...: each new multiple of p^k bumps exponent by 1.
         -- Stride multiplies by p each pass, so this runs at most log_p(N) times.
         --
         -- Diagonalization: intersection of stride-p and stride-p² is exactly
         -- stride-p² — every p-th member of the p-multiples lives in the p²
-        -- family. The UPDATE exploits that diagonal identity.
+        -- family. The UPDATE exploits that diagonal identity. Restricted to the
+        -- same n > lo window so already-settled exponents are never bumped twice.
         pk := p * p;
         WHILE pk <= lim LOOP
             UPDATE factorizations
             SET    exponent = exponent + 1
-            FROM   generate_series(pk, lim, pk) AS s
+            FROM   generate_series((lo / pk + 1) * pk, lim, pk) AS s
             WHERE  factorizations.prime = p
               AND  factorizations.n     = s;
 
@@ -182,6 +197,8 @@ BEGIN
     RAISE NOTICE '[5/5] Computing ω(n), Ω(n), squarefree flag  (%)',
         clock_timestamp();
 
+    -- Only the newly-factorized integers need their derived columns set;
+    -- rows at or below lo already carry final ω/Ω/squarefree values.
     UPDATE integers i
     SET
         omega         = agg.omega,
@@ -193,6 +210,7 @@ BEGIN
             COUNT(*)::INTEGER      AS omega,
             SUM(exponent)::INTEGER AS big_omega
         FROM factorizations
+        WHERE n > lo
         GROUP BY n
     ) agg
     WHERE i.n = agg.n;

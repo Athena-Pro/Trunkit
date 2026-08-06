@@ -352,6 +352,26 @@ artifacts AS (
            a.sha256, a.checker_cmd, a.registered_at
       FROM cert.artifact a
      WHERE a.claim_id = ANY(p_claim_ids)
+),
+-- Every seq, not just the latest -- see the note in 100_cert_lifecycle. Each
+-- entry carries row_hash/prev_hash so the superseded certificates are checkable
+-- against the chain too, not merely readable.
+cert_history AS (
+    SELECT claim_id,
+           jsonb_agg(jsonb_build_object(
+               'cert_id',     id,
+               'seq',         seq,
+               'status',      status,
+               'evidence',    evidence,
+               'valid_under', valid_under,
+               'checked_at',  checked_at,
+               'signer_id',   signer_id,
+               'row_hash',    row_hash,
+               'prev_hash',   prev_hash
+           ) ORDER BY seq) AS history
+      FROM cert.certificate
+     WHERE claim_id = ANY(p_claim_ids)
+     GROUP BY claim_id
 )
 SELECT jsonb_build_object(
     'trunk_bundle_version', 2,
@@ -375,6 +395,7 @@ SELECT jsonb_build_object(
                                'inference_hash', (SELECT i.row_hash FROM curry.inferences i
                                                    WHERE i.inference_id = lc.checker_inference_id)
                            ),
+            'certificate_history', COALESCE(ch.history, '[]'::jsonb),
             'witness',     CASE WHEN lw.witness_kind IS NOT NULL
                            THEN jsonb_build_object('kind', lw.witness_kind, 'body', lw.witness_body,
                                                    'row_hash', lw.witness_row_hash)
@@ -402,6 +423,7 @@ LEFT JOIN latest_witness lw ON lw.certificate_id = lc.cert_id
 LEFT JOIN derivations    d  ON d.conclusion_id   = cl.id
 LEFT JOIN artifacts      a  ON a.claim_id        = cl.id
 LEFT JOIN revocations    r  ON r.certificate_id  = lc.cert_id
+LEFT JOIN cert_history   ch ON ch.claim_id       = cl.id
 WHERE cl.id = ANY(p_claim_ids);
 $$;
 
@@ -409,4 +431,6 @@ COMMENT ON FUNCTION cert.export_bundle(BIGINT[]) IS
     'Portable proof bundle v2. Carries per-certificate row_hash/prev_hash/'
     'premise_hashes/inference_hash + witness row_hash + the ledger_root, so a '
     'consumer (calx.ledger.verify_chain) re-checks content integrity and proof '
-    'entanglement offline. cert.verify() still re-checks the claims themselves.';
+    'entanglement offline. cert.verify() still re-checks the claims themselves. '
+    'certificate_history carries every seq (the ledger''s full attestation trail '
+    'for the claim); certificate carries the latest and is what verify() re-checks.';

@@ -55,6 +55,12 @@ chess-carry/
 ladder-encoder/
 rhyme-discovery/
 
+# Session scratch -- durable holding pen for work-in-progress/completed
+# files produced during Claude Code sessions. Lives in-repo (unlike OS
+# temp scratchpads, which get cleaned and can silently lose work) but is
+# never committed or pushed.
+scratch/
+
 # Loom layer (bespoke arithmetic of orthogonal F_1 axes) -- local, untracked
 docs/LOOM_ORTHOGONAL_F1.md
 local/sql/97_kan_loom.sql
