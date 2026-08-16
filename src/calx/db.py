@@ -32,8 +32,8 @@ def schema_order(name: str) -> tuple[int, str]:
 
     Plain lexical sort breaks at the 2->3 digit boundary ('100_...' would
     apply before '10_curry.sql'). Ordering by (numeric prefix, remainder)
-    keeps '41_' < '41a_' < '42_' and '99_' < '100_'. The Makefile / CI apply
-    loops encode the same order as ``LC_ALL=C sort -n``.
+    keeps '41_' < '41a_' < '42_' and '99_' < '100_'. The Makefile and CI call
+    the package loader so this function remains the single ordering authority.
     """
     digits = ""
     for ch in name:

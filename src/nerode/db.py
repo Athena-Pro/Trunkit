@@ -61,6 +61,14 @@ SCHEMA_FILES = (
     "B4_carry.sql",             # Phase 5e — carry the ledger across the Porter handoff
     # Phase 6 — unified witness-kind re-verification.
     "C0_verify.sql",            # Phase 6a — nerode.verify() dispatches by witness kind
+    # Applied by the old `ls | sort` Makefile/CI loop but absent from this tuple,
+    # so they reached hand-applied databases and never the ones built by
+    # apply_schema (every test DB included). Listed here as the precondition for
+    # making this tuple the single loader: 98 sorts after 97 and before the
+    # letter-prefixed phases under plain `sort`, but the letter phases are
+    # dependency-critical and must keep running first, so both go at the end.
+    "98_topological_signature.sql",   # DFA Betti signature (LQLE bridge)
+    "99_precacher_roundtrip_cert.sql",# certifies the close->open roundtrip invariant
 )
 
 

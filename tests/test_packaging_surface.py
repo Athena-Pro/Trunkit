@@ -69,3 +69,67 @@ def test_readme_install_surface_matches_single_distribution():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "pip install nerode" not in readme
     assert "pip install trunkit   # installs both the trunkit and nerode CLIs" in readme
+
+
+def test_base_install_stays_pure_python_with_binary_as_a_real_extra():
+    """Pins the Termux/ARM decision, and the extra that makes it survivable.
+
+    psycopg[binary] ships no wheel for Termux/ARM and other non-x86 targets, so
+    it must NOT be the base dependency -- that trades a missing-libpq failure on
+    minimal Linux for a hard install failure everywhere off x86. The libpq-free
+    Linux path is `trunkit[binary]`, which the linux-wheel-smoke CI leg installs
+    and exercises, so this extra is load-bearing rather than decorative.
+
+    A platform marker is not an alternative: packaging markers cannot reliably
+    separate glibc, musl, and Termux/Android.
+    """
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pyproject["project"]["dependencies"] == ["psycopg>=3.2,<4"]
+    extras = pyproject["project"]["optional-dependencies"]
+    assert "psycopg[binary]>=3.2,<4" in extras["binary"]
+
+
+def test_mcp_extra_excludes_the_unsupported_major_version():
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    extras = pyproject["project"]["optional-dependencies"]
+    assert "mcp>=1.0.0,<2" in extras["mcp"]
+    assert "pydantic-settings>=2.5.2,<2.13" in extras["mcp"]
+    assert "mcp>=1.0.0,<2" in extras["dev"]
+    assert "pydantic-settings>=2.5.2,<2.13" in extras["dev"]
+
+
+def test_ci_and_make_use_the_numeric_aware_schema_loader():
+    workflow = (ROOT / ".github" / "workflows" / "python-package-conda.yml").read_text(
+        encoding="utf-8"
+    )
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    assert 'trunkit --dsn "$CALX_DSN" init' in workflow
+    assert 'trunkit --dsn "$(TRUNK_DSN)" init' in makefile
+    assert 'nerode --dsn "$NERODE_DSN" close --apply' in workflow
+    assert 'nerode --dsn "$(NERODE_DSN)" close --apply' in makefile
+    # No shell-sorted apply loop on either side. calx was the one that actually
+    # broke (100_ before 10_ under `sort -n`, 112 errors psql walked straight
+    # past); nerode had the same construction and was correct only by luck of
+    # never reaching three digits.
+    for haystack in (workflow, makefile):
+        assert "sort -n" not in haystack
+        assert "ls src/nerode/sql" not in haystack
+        assert "ls src/calx/sql" not in haystack
+
+
+def test_nerode_schema_loader_covers_every_sql_file_on_disk():
+    """The calx side pins this (test_unified_schema_tracks_all_numbered_sql_files);
+    nerode did not, and drifted -- 98_topological_signature.sql and
+    99_precacher_roundtrip_cert.sql sat on disk outside SCHEMA_FILES, so the old
+    `ls | sort` loop applied them and apply_schema did not. Every test database
+    is built by apply_schema, so the cert that certifies the precacher
+    close->open roundtrip never existed in the databases asserting that
+    invariant. Switching the Makefile to the loader is only safe while these
+    two lists agree."""
+    from nerode.db import SCHEMA_FILES
+
+    on_disk = {p.name for p in (ROOT / "src" / "nerode" / "sql").glob("*.sql")}
+    assert on_disk == set(SCHEMA_FILES), (
+        f"only on disk: {sorted(on_disk - set(SCHEMA_FILES))}; "
+        f"only in SCHEMA_FILES: {sorted(set(SCHEMA_FILES) - on_disk)}"
+    )
