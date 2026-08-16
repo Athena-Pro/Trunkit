@@ -68,9 +68,35 @@ trunkit-mcp = "trunkit_mcp.server:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/calx", "src/nerode", "src/trunkit_mcp"]
 
+# shared-data is a force-include mapping: it does NOT respect .gitignore or the
+# `exclude` list, so a directory mapped here ships whatever happens to be on the
+# builder's disk. Mapping "proofs" wholesale put 8,885 files / 97 MB of Lean
+# .lake build artifacts into 0.4.0 (6.9 GB of them exist locally) -- the exact
+# "3 GB compiler in the box" the README promises is never shipped. Every entry
+# below is therefore a single tracked FILE, not a directory. Adding a tool means
+# adding a line here; that is the cost of a build that cannot leak.
 [tool.hatch.build.targets.wheel.shared-data]
-"tools" = "share/trunkit/tools"
-"proofs" = "share/trunkit/proofs"
+"tools/AxiomAudit.lean"           = "share/trunkit/tools/AxiomAudit.lean"
+"tools/cert_crypto.py"            = "share/trunkit/tools/cert_crypto.py"
+"tools/cert_formal.py"            = "share/trunkit/tools/cert_formal.py"
+"tools/compose_match.py"          = "share/trunkit/tools/compose_match.py"
+"tools/demo_bound_tier.py"        = "share/trunkit/tools/demo_bound_tier.py"
+"tools/erdos_straus.py"           = "share/trunkit/tools/erdos_straus.py"
+"tools/factorial_homology.py"     = "share/trunkit/tools/factorial_homology.py"
+"tools/figure_extract.py"         = "share/trunkit/tools/figure_extract.py"
+"tools/fraction_families.py"      = "share/trunkit/tools/fraction_families.py"
+"tools/general_fraction_families.py" = "share/trunkit/tools/general_fraction_families.py"
+"tools/image_features.py"         = "share/trunkit/tools/image_features.py"
+"tools/lean_check.sh"             = "share/trunkit/tools/lean_check.sh"
+"tools/oeis_loader.py"            = "share/trunkit/tools/oeis_loader.py"
+"tools/oeis_match.py"             = "share/trunkit/tools/oeis_match.py"
+"tools/prime_members_functor.py"  = "share/trunkit/tools/prime_members_functor.py"
+"tools/seq_homology.py"           = "share/trunkit/tools/seq_homology.py"
+"tools/verify_bundle.py"          = "share/trunkit/tools/verify_bundle.py"
+"proofs/combined_signature.py"    = "share/trunkit/proofs/combined_signature.py"
+"proofs/equipment.py"             = "share/trunkit/proofs/equipment.py"
+"proofs/gap_homology_primes.py"   = "share/trunkit/proofs/gap_homology_primes.py"
+"proofs/perfect_28.py"            = "share/trunkit/proofs/perfect_28.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

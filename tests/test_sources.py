@@ -33,15 +33,22 @@ pytestmark = pytest.mark.network
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _roundtrip(session_id: str, key: str, source) -> dict:
+def _roundtrip(session_id: str, key: str, source, dsn: str | None = None) -> dict:
     """Pre-cache one key, open the session, return the resolved value.
 
     Always uses force_rebuild=True so network tests never return a stale
     cached value from a previous test run.
+
+    `dsn` must be threaded through both halves. Every caller takes the
+    `nerode_dsn` fixture -- which is what gates the test on NERODE_TEST_DSN
+    being set -- but the value used to be dropped on the floor here, so both
+    Precacher instances fell back to `resolve_dsn()` (NERODE_DSN, else the
+    hardcoded 5435 default). The fixture then read as "this test respects the
+    test DSN" while the test actually connected somewhere else entirely.
     """
-    with Precacher(session_id) as pc:
+    with Precacher(session_id, dsn=dsn) as pc:
         pc.fetch(key, source, retries=2, force_rebuild=True)
-    return Precacher.open(pc.envelope, f"{session_id}-b")["resolved"][key]
+    return Precacher.open(pc.envelope, f"{session_id}-b", dsn=dsn)["resolved"][key]
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +95,7 @@ class TestWeatherSource:
 
     def test_precacher_roundtrip(self, nerode_dsn):
         key = f"weather:london:{TODAY}"
-        result = _roundtrip(f"src-weather-test-{TODAY}", key, WeatherSource(51.51, -0.12, label="London"))
+        result = _roundtrip(f"src-weather-test-{TODAY}", key, WeatherSource(51.51, -0.12, label="London"), dsn=nerode_dsn)
         assert "temperature_2m" in result
         assert result.get("location") == "London"
 
@@ -134,7 +141,7 @@ class TestTickerSource:
 
     def test_precacher_roundtrip(self, nerode_dsn):
         key = f"ticker:AAPL:{TODAY}"
-        result = _roundtrip(f"src-ticker-test-{TODAY}", key, TickerSource("AAPL"))
+        result = _roundtrip(f"src-ticker-test-{TODAY}", key, TickerSource("AAPL"), dsn=nerode_dsn)
         assert result["symbol"] == "AAPL"
         assert result["regularMarketPrice"] > 0
 
@@ -165,6 +172,7 @@ class TestMultiTickerSource:
             f"src-multi-ticker-test-{TODAY}",
             key,
             MultiTickerSource(["AAPL", "MSFT"]),
+            dsn=nerode_dsn,
         )
         assert "AAPL" in result
         assert "MSFT" in result
@@ -204,7 +212,7 @@ class TestHNSource:
 
     def test_precacher_roundtrip(self, nerode_dsn):
         key = f"news:hn:top5:{TODAY}"
-        result = _roundtrip(f"src-hn-test-{TODAY}", key, HNSource(5))
+        result = _roundtrip(f"src-hn-test-{TODAY}", key, HNSource(5), dsn=nerode_dsn)
         assert isinstance(result, list)
         assert len(result) == 5
         assert all("title" in s for s in result)
@@ -220,7 +228,7 @@ class TestMorningBriefPack:
     def test_full_pack_and_open(self, nerode_dsn):
         session_id = f"morning-brief-{TODAY}-test"
 
-        with Precacher(session_id) as pc:
+        with Precacher(session_id, dsn=nerode_dsn) as pc:
             pc.fetch(f"weather:london:{TODAY}",  WeatherSource(51.51, -0.12, label="London"), force_rebuild=True)
             pc.fetch(f"ticker:AAPL:{TODAY}",     TickerSource("AAPL"),  force_rebuild=True)
             pc.fetch(f"ticker:MSFT:{TODAY}",     TickerSource("MSFT"),  force_rebuild=True)
@@ -229,7 +237,7 @@ class TestMorningBriefPack:
         assert pc.envelope is not None
         assert len(pc.envelope["cache_keys"]) == 4
 
-        ctx = Precacher.open(pc.envelope, f"{session_id}-b")
+        ctx = Precacher.open(pc.envelope, f"{session_id}-b", dsn=nerode_dsn)
 
         assert ctx["prior_session"]["cert_valid"] is True
         resolved = ctx["resolved"]
@@ -249,9 +257,12 @@ class TestMorningBriefPack:
         news = resolved[f"news:hn:top5:{TODAY}"]
         assert len(news) == 5
 
-    def test_envelope_attention_hint_lists_all_keys(self):
+    def test_envelope_attention_hint_lists_all_keys(self, nerode_dsn):
+        # Took no fixture at all before, so it had no NERODE_TEST_DSN gate and
+        # wrote to whatever resolve_dsn() returned -- the canonical instance on
+        # a developer box with NERODE_DSN set.
         session_id = f"hint-test-{TODAY}"
-        with Precacher(session_id) as pc:
+        with Precacher(session_id, dsn=nerode_dsn) as pc:
             pc.fetch(f"weather:nyc:{TODAY}", WeatherSource(40.71, -74.01, label="NYC"))
             pc.fetch(f"ticker:GOOG:{TODAY}", TickerSource("GOOG"))
 

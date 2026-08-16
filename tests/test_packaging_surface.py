@@ -25,11 +25,44 @@ def test_unified_schema_tracks_all_numbered_sql_files():
     assert expected == calx_db.UNIFIED_FILES
 
 
-def test_wheel_shared_data_includes_tools_and_proofs():
+def _shared_data() -> dict[str, str]:
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-    shared_data = pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["shared-data"]
-    assert shared_data["tools"] == "share/trunkit/tools"
-    assert shared_data["proofs"] == "share/trunkit/proofs"
+    return pyproject["tool"]["hatch"]["build"]["targets"]["wheel"]["shared-data"]
+
+
+def test_wheel_shared_data_maps_files_never_directories():
+    """The 0.4.0 leak, pinned so it cannot come back.
+
+    shared-data is a force-include mapping: it honours neither .gitignore nor
+    `exclude`, so a mapped DIRECTORY ships whatever sits on the builder's disk.
+    Mapping "proofs" wholesale put 8,885 files / 97 MB of untracked Lean .lake
+    build artifacts into the 0.4.0 wheel (32.4 MB, against a 1.5 MB core) --
+    the "3 GB compiler in the box" the README promises is never shipped.
+    Every entry must therefore name a single existing FILE.
+    """
+    for src, dest in _shared_data().items():
+        path = ROOT / src
+        assert path.is_file(), f"shared-data key {src!r} is not an existing file"
+        assert dest.startswith("share/trunkit/"), f"{src!r} escapes share/trunkit/"
+        # A directory mapping is the leak; a file mapped onto a bare directory
+        # destination would silently reintroduce it.
+        assert dest.endswith(Path(src).name), f"{src!r} must map onto its own basename"
+
+
+def test_wheel_shared_data_still_carries_the_tools_that_matter():
+    """Explicit-file mapping trades leak-safety for a list that can go stale:
+    a new tool is only shipped once someone adds a line. These are the ones a
+    consumer is documented to run, so a silent drop is a broken install."""
+    shared_data = _shared_data()
+    for required in (
+        "tools/cert_formal.py",      # the attestation pass
+        "tools/verify_bundle.py",    # consumer-side bundle verification
+        "tools/oeis_loader.py",
+        "tools/oeis_match.py",
+        "tools/lean_check.sh",       # T1 Lean bridge checker hook
+        "proofs/combined_signature.py",
+    ):
+        assert required in shared_data, f"{required} dropped out of the wheel"
 
 
 def test_readme_install_surface_matches_single_distribution():
