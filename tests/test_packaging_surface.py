@@ -117,6 +117,36 @@ def test_ci_and_make_use_the_numeric_aware_schema_loader():
         assert "ls src/calx/sql" not in haystack
 
 
+def test_domain_schemas_are_reflected_into_kan():
+    """The sync list is the only thing that decides what kan can see.
+
+    110 states the reuse as an accomplished fact -- "because sync_category
+    reflects ANY schema, `comb` becomes a kan category the moment it exists" --
+    but sync_category only ever runs on the names in this list, and comb was
+    never added. prov (114) arrived the same way. A self-analysis pass found
+    both invisible, so the list is pinned here rather than left to be
+    rediscovered when the next domain schema goes missing.
+
+    cert is intentionally excluded: reflecting the ledger's own schema is a
+    design question, not an omission.
+    """
+    assert set(calx_db.KAN_SYNC_CATEGORIES) == {"calx", "curry", "kan", "comb", "prov"}
+
+    # Every schema the package's own SQL creates, so a new one cannot be added
+    # without this test forcing a decision about whether kan should see it.
+    created = set()
+    for name in calx_db.UNIFIED_FILES:
+        for line in (ROOT / "src" / "calx" / "sql" / name).read_text(
+                encoding="utf-8").splitlines():
+            stripped = line.strip().upper()
+            if stripped.startswith("CREATE SCHEMA IF NOT EXISTS"):
+                created.add(line.strip().split()[-1].rstrip(";").lower())
+    unreflected = created - set(calx_db.KAN_SYNC_CATEGORIES)
+    assert unreflected == {"cert"}, (
+        f"schemas neither reflected into kan nor consciously excluded: "
+        f"{unreflected - {'cert'}}")
+
+
 def test_nerode_schema_loader_covers_every_sql_file_on_disk():
     """The calx side pins this (test_unified_schema_tracks_all_numbered_sql_files);
     nerode did not, and drifted -- 98_topological_signature.sql and

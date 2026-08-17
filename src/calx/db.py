@@ -76,6 +76,20 @@ UNIFIED_FILES = _numbered_sql_files()
 # (ALTER ROLE in 00_rehome only affects *future* sessions).
 SEARCH_PATH = "calx, curry, kan, public"
 
+# Schemas reflected into kan.object / kan.morphism by apply_unified.
+#
+# This tuple is the ONLY thing deciding what kan can see, which is how comb and
+# prov came to be invisible: 110's header states the reuse as already true --
+# "because sync_category reflects ANY schema, `comb` becomes a kan category the
+# moment it exists" -- but sync_category only ever runs on the names here, and
+# the list named three. A self-analysis pass caught both. They reflect cleanly
+# (comb 10 objects / 10 morphisms, prov 3 / 3, no dangling arrows).
+#
+# `cert` is deliberately absent. Reflecting the ledger's own schema as a
+# category is a genuine design question -- 22 objects, and the tool describing
+# itself -- not an oversight to be quietly corrected.
+KAN_SYNC_CATEGORIES = ("calx", "curry", "kan", "comb", "prov")
+
 DEFAULT_DSN = "postgresql://trunk:trunk@localhost:5432/trunk"
 
 # Without a timeout, an unreachable host hangs the CLI indefinitely.
@@ -162,6 +176,6 @@ def apply_unified(conn: Connection, *, sync_kan: bool = True) -> None:
             if fname == "00_rehome_to_calx.sql":
                 cur.execute(f"SET search_path = {SEARCH_PATH}")
         if sync_kan:
-            for cat in ("calx", "curry", "kan"):
+            for cat in KAN_SYNC_CATEGORIES:
                 cur.execute("SELECT kan.sync_category(%s, %s)", (cat, cat))
             cur.execute("SELECT * FROM kan.populate_curry_calx_functor()")
