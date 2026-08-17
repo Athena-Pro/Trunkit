@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "trunkit"
-version = "0.4.0"
+version = "0.5.0"
 authors = [
   { name = "Athena Kaminsky", email = "thegiantsnail@gmail.com" },
 ]
@@ -94,6 +94,7 @@ packages = ["src/calx", "src/nerode", "src/trunkit_mcp"]
 "tools/cert_formal.py"            = "share/trunkit/tools/cert_formal.py"
 "tools/compose_match.py"          = "share/trunkit/tools/compose_match.py"
 "tools/demo_bound_tier.py"        = "share/trunkit/tools/demo_bound_tier.py"
+"tools/demo_erdos_1196.py"        = "share/trunkit/tools/demo_erdos_1196.py"
 "tools/erdos_straus.py"           = "share/trunkit/tools/erdos_straus.py"
 "tools/factorial_homology.py"     = "share/trunkit/tools/factorial_homology.py"
 "tools/figure_extract.py"         = "share/trunkit/tools/figure_extract.py"
