@@ -100,7 +100,63 @@ def audit_ok(axioms: Iterable[str], uses_sorry: bool, *, allow_native: bool = Fa
     return all(a in allowed for a in axioms)
 
 
+def statement_closure(audit: Mapping) -> dict[str, tuple[str, str]] | None:
+    """The auditor's ``statement_closure`` as ``{constant: (type_hash, value_hash)}``.
+
+    ``None`` when the auditor did not emit one (an older AxiomAudit, or
+    LEAN_AUDIT_NO_CLOSURE set). Callers must read ``None`` as "not observed",
+    never as "no drift".
+    """
+    rows = audit.get("statement_closure")
+    if rows is None:
+        return None
+    return {str(name): (str(th), str(vh)) for name, th, vh in rows}
+
+
+def closure_manifest_digest(manifest: Mapping[str, tuple[str, str]]) -> str:
+    """Canonical digest of a statement closure.
+
+    Recipe (mirrored exactly by cert.record_closure_manifest in 117, which
+    refuses a manifest whose digest does not match -- so the ledger can never
+    hold a digest paired with a manifest it did not come from):
+
+        lines  := sorted by name (code-point order, i.e. COLLATE "C"),
+                  "<name>\\t<type_hash>\\t<value_hash>"
+        digest := sha256("\\n".join(lines))
+    """
+    lines = [f"{n}\t{th}\t{vh}" for n, (th, vh) in sorted(manifest.items())]
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+
+def closure_diff(bound: Mapping[str, tuple[str, str]],
+                 observed: Mapping[str, tuple[str, str]]) -> dict[str, list[str]]:
+    """Which constants a statement's meaning moved through.
+
+    ``changed`` is the actionable list: a definition the statement depends on
+    now has a different type or body. ``added``/``removed`` follow from it (a
+    weakened definition usually stops mentioning what it used to) and are
+    reported for completeness, not as separate defects.
+    """
+    return {
+        "changed": sorted(n for n in bound.keys() & observed.keys()
+                          if bound[n] != observed[n]),
+        "added": sorted(observed.keys() - bound.keys()),
+        "removed": sorted(bound.keys() - observed.keys()),
+    }
+
+
 def default_checker_cmd(project_root: str, target_decl: str) -> str:
     from calx import get_shared_data_dir
     script = get_shared_data_dir("tools") / "lean_check.sh"
     return f'"{script}" "{project_root}" "{target_decl}"'
+
+
+def comparator_checker_cmd(project_root: str, config: str) -> str:
+    """Checker command for the comparator kind (tools/comparator_check.sh).
+
+    ``config`` is the comparator challenge JSON, relative to ``project_root``
+    (e.g. ``ComparatorChallenges/NavierStokes.json``).
+    """
+    from calx import get_shared_data_dir
+    script = get_shared_data_dir("tools") / "comparator_check.sh"
+    return f'"{script}" "{project_root}" "{config}"'

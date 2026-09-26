@@ -162,3 +162,56 @@ The bridge does **not** put Lean in the database; the checker stays external —
 4. `#728` worked example as the acceptance test; then batch-register the §2(b) backlog (#205, #397, #457, #1026, #1051, …).
 
 Net new code is small because the certificate ledger, drift gate, provenance, and bundle export are all reused. The Lean-specific surface is the auditor, the driver, four columns, and one harness branch.
+
+---
+
+## 7. Statement meaning, not just statement text (117, 2026-09)
+
+§5.1 leaves statement faithfulness to a human, and 106 pins the statement's
+*text* once that human has judged it. Text is not meaning:
+
+```lean
+def Strong (c : Cfg) : Prop := c.n = c.n + 0   -- bound
+def Strong (c : Cfg) : Prop := True            -- weakened
+theorem target (c : Cfg) : Strong c := ...     -- identical in both
+```
+
+The syntactic digest, and even Lean's pretty-printed type, are unchanged by
+that edit. So an agent that cannot prove the theorem can weaken a definition
+it depends on, and 106 still reports `valid`.
+
+**Closure binding.** `AxiomAudit` now emits `statement_closure`: every constant
+the statement's meaning depends on, with a structural hash of its type and
+body. Definitions and inductives are walked; theorems are skipped by proof
+irrelevance. `trunkit bind-statement <claim> --audit audit.json --write` pins
+it. On every `attest`, the harness records the observed closure and reads back
+`cert.statement_bound`. **Definition drift** refutes the certificate even when
+the axiom audit is clean, and the evidence names the constants that moved
+(`closure_diff.changed == ["Drift.Strong"]`; real fixtures are in
+`tests/fixtures/lean_closure/`). Manifests are content-addressed. The DB
+recomputes each digest and refuses a mismatch. A 3,106-constant closure (Formal
+Conjectures' Navier–Stokes (C)) costs about 195 KB once.
+
+**Limits.** Closures only compare within one toolchain, so a cross-toolchain
+observation is reported `unverified` ("not comparable"), never as drift.
+`Expr.hash` has 32 significant bits. That makes this a drift detector, not a
+defence against a deliberately crafted collision.
+
+**Comparator kind.** For the adversarial case, and to match the standard the
+2026 Navier–Stokes and Riemann-zeta certificates were published under,
+`trunkit register-lean … --comparator <challenge.json>` registers
+`tools/comparator_check.sh`. The wrapper runs leanprover/comparator:
+challenge and solution are built in separate sandboxes, the statement's
+declarations must be identical, axioms are checked, and the proof is replayed
+through Lean's kernel and optionally nanoda. The wrapper emits the auditor's
+JSON shape. Missing prerequisites (landrun is Linux-only) exit 2, which the
+harness now records as `error`, not `refuted`, per `lean_check.sh`'s documented
+contract.
+
+**Anchors.** `tools/anchor_navier_stokes.py` records the forced breakdown
+statements (C)/(D), each bound to its Formal Conjectures closure, with the
+proof pinned at openai/NavierStokesAndEuler@8937a8f. It also records "this
+settles the unforced problem" as a separate claim with zero premises, plus the
+credit graph, including a disputed priority claim that transmits nothing. The
+#1196 demo now cites the right paper (arXiv:2605.00301, not #728's
+2601.07421) and pins LeanMarathon's formalization.

@@ -43,6 +43,16 @@ import psycopg
 
 PROBLEM = "erdos_1196"
 
+# Where the asymptotic statement is proved and formalized. The anchor used to
+# cite arXiv:2601.07421 -- that is the Aristotle writeup of #728, a different
+# problem. #1196's proof is Tao's (arXiv:2605.00301); LeanMarathon
+# (arXiv:2606.05400) formalized it with no sorry. Pinned by commit so the
+# locator names one proof, not a moving branch.
+PAPER = "arXiv:2605.00301"
+LEAN_REPO = "https://github.com/YuanheZ/LeanMarathon"
+LEAN_COMMIT = "e2febe2ce717ef5d8410909683f6f5b301bda4c2"
+LOCATOR = f"{PAPER}; Lean: {LEAN_REPO}@{LEAN_COMMIT} (arXiv:2606.05400)"
+
 # Four sets: three primitive for different reasons, one a maximal chain.
 SETS = {
     "primes_to_50": (
@@ -140,7 +150,7 @@ def main() -> int:
         stmt = (f"[{tag}] Erdos #1196: for every primitive set A, "
                 "sum_{a in A} 1/(a log a) <= sum_{p prime} 1/(p log p)")
         cur.execute("SELECT comb.anchor_asymptotic(%s,%s,%s,%s)",
-                    (stmt, PROBLEM, list(claims.values()), "arXiv:2601.07421"))
+                    (stmt, PROBLEM, list(claims.values()), LOCATOR))
         anchor = cur.fetchone()[0]
         cur.execute("SELECT count(*) FROM cert.derivation WHERE conclusion_id = %s",
                     (anchor,))
@@ -152,6 +162,14 @@ def main() -> int:
         print(f"  standing        : {row[0] if row else 'unchecked'}")
         print(f"  premise edges   : {premises}   <-- must be 0")
         print(f"  finite evidence : {list(claims.values())} (recorded as motivation only)")
+        print(f"  proof           : {PAPER}")
+        print(f"  formalization   : {LEAN_REPO}@{LEAN_COMMIT[:12]}")
+        print("  to CHECK it     : clone at that commit, then")
+        print(f"                    trunkit register-lean {anchor} --root <clone> "
+              "--decl <#1196 theorem> --write")
+        print("                    lean_check.sh <clone> <decl> > audit.json")
+        print(f"                    trunkit bind-statement {anchor} --audit audit.json --write")
+        print("                    trunkit attest --write")
         assert premises == 0, "the asymptotic anchor grew a premise edge"
 
         # ---------------- T5: provenance ----------------
@@ -218,7 +236,7 @@ def main() -> int:
         print(f"  finite claims minted     : {len(claims)} (exact, re-runnable) — "
               f"{sum(1 for n in claims if n != 'powers_of_two')} valid, 1 refuted")
         print(f"  asymptotic anchor        : #{anchor}, {cur.fetchone()[0]} premises, "
-              f"unchecked until Lean runs")
+              f"unchecked until LeanMarathon's proof is checked here")
         print("  the conjecture is NOT supported by the finite work, by construction.")
         print("\n  A primitive set is a fact. #1196 is not. The ledger keeps them apart.")
     return 0

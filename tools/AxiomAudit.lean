@@ -23,7 +23,11 @@ For the target declaration it:
   4. prints a one-line JSON verdict to stdout:
        {"decl":"…","type":"…","axioms":[…],
         "buckets":{"core":[…],"attested":[…],"disallowed":[…]},
+        "statement_closure":[["<const>","<type hash>","<value hash>"],…],
         "allow_attested":false,"uses_sorry":false,"ok":true}
+     statement_closure is every constant the statement's MEANING depends on
+     (see statementClosure; bound and compared by 117_cert_statement_closure).
+     Set LEAN_AUDIT_NO_CLOSURE=1 to omit it.
   5. exits 0 iff  (¬uses_sorry) ∧ disallowed = ∅
                 ∧ (attested = ∅ ∨ --allow-attested was given).
 
@@ -102,6 +106,67 @@ def runSelftest : IO UInt32 := do
   IO.println <| "{\"selftest\":\"AxiomAudit\",\"cases\":" ++ toString (selftestCases.length + 1) ++ ",\"failures\":" ++ toString failures ++ "}"
   return (if failures == 0 then 0 else 1)
 
+/-- A 64-bit hash as exactly 16 lowercase hex digits. -/
+def hex16 (h : UInt64) : String :=
+  -- Built from Char.toString and pushn, both stable across the 4.2x line;
+  -- `String.mk` is deprecated as of 4.27 and its replacement is too new.
+  let s := String.join ((Nat.toDigits 16 h.toNat).map Char.toString)
+  ("".pushn '0' (16 - s.length)) ++ s
+
+/-- The STATEMENT CLOSURE of `root`: every constant the meaning of its type
+depends on, each with a hash of its type and of its definitional content.
+
+This is what the syntactic statement digest (calx.goalhash, 106) cannot see.
+`theorem t : P` keeps its text when `def P` is weakened from a real condition
+to `True`; its closure does not keep its hash. Comparator
+(github.com/leanprover/comparator) closes the same hole by checking every
+declaration a statement uses is identical across two environments; this is
+the single-environment version of that check, recorded so the ledger can
+compare a binding against a later observation.
+
+Walk rules:
+  * the root contributes its TYPE only -- its value is the proof;
+  * definitions contribute type and value, and both are walked;
+  * inductives contribute their shape (constructors, params, indices) and the
+    constructors are walked;
+  * theorems are skipped entirely. By proof irrelevance no statement's meaning
+    can depend on which proof of a Prop was used, and walking theorem types
+    reached through proof fields of instances would pull in most of Mathlib
+    for no information;
+  * opaque constants, axioms, recursors and quotient primitives contribute
+    their type only;
+  * a name that does not resolve is recorded with zero hashes rather than
+    dropped, so it cannot hide.
+
+`Expr.hash` is structural and ignores binder names, so alpha-renaming does not
+register as drift. It is non-cryptographic and, although typed UInt64, carries
+32 significant bits (the rest of Expr.Data holds flags): a given edit escapes
+detection with probability about 2^-32. So this detects drift,
+including drift an agent introduced; it is not a defence against a collision
+crafted on purpose. That case is comparator's, which compares the
+declarations themselves. -/
+def statementClosure (env : Environment) (root : Name) : Array (Name × UInt64 × UInt64) := Id.run do
+  let some rootCi := env.find? root | return #[]
+  let mut seen : NameSet := NameSet.empty.insert root
+  let mut out : Array (Name × UInt64 × UInt64) := #[(root, rootCi.type.hash, 0)]
+  let mut stack : Array Name := rootCi.type.getUsedConstants
+  while !stack.isEmpty do
+    let n := stack.back!
+    stack := stack.pop
+    if seen.contains n then continue
+    seen := seen.insert n
+    match env.find? n with
+    | none => out := out.push (n, 0, 0)
+    | some (.thmInfo _) => pure ()
+    | some c =>
+      let (vh, next) : UInt64 × Array Name := match c with
+        | .defnInfo d   => (d.value.hash, d.value.getUsedConstants)
+        | .inductInfo i => (hash (i.ctors, i.numParams, i.numIndices), i.ctors.toArray)
+        | _             => (0, #[])
+      out := out.push (n, c.type.hash, vh)
+      stack := stack ++ c.type.getUsedConstants ++ next
+  return out
+
 def jsonEscape (s : String) : String :=
   s.foldl (init := "") fun acc c =>
     acc ++ match c with
@@ -152,6 +217,15 @@ unsafe def main (args : List String) : IO UInt32 := do
       catch _ => pure "<unprintable>"
     let nameArr := fun (ns : Array Name) => String.intercalate ","
       (ns.toList.map (fun n => "\"" ++ jsonEscape (toString n) ++ "\""))
+    -- [name, type hash, value hash] per constant; see statementClosure.
+    -- LEAN_AUDIT_NO_CLOSURE=1 omits it (the field is then absent, which the
+    -- harness reads as "no closure observed", never as "no drift").
+    let closureJson ←
+      if (← IO.getEnv "LEAN_AUDIT_NO_CLOSURE").isSome then pure ""
+      else
+        let rows := (statementClosure env declName).toList.map fun (n, th, vh) =>
+          "[\"" ++ jsonEscape (toString n) ++ "\",\"" ++ hex16 th ++ "\",\"" ++ hex16 vh ++ "\"]"
+        pure (",\"statement_closure\":[" ++ String.intercalate "," rows ++ "]")
     IO.println <| String.intercalate "" [
       "{\"decl\":\"", jsonEscape declStr, "\"",
       ",\"type\":\"", jsonEscape typeStr, "\"",
@@ -159,6 +233,7 @@ unsafe def main (args : List String) : IO UInt32 := do
       ",\"buckets\":{\"core\":[", nameArr core,
       "],\"attested\":[", nameArr attested,
       "],\"disallowed\":[", nameArr disallowed, "]}",
+      closureJson,
       ",\"allow_attested\":", (if allowAttested then "true" else "false"),
       ",\"uses_sorry\":", (if usesSorry then "true" else "false"),
       ",\"ok\":", (if ok then "true" else "false"), "}"

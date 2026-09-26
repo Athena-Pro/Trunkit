@@ -92,6 +92,7 @@ packages = ["src/calx", "src/nerode", "src/trunkit_mcp"]
 "tools/AxiomAudit.lean"           = "share/trunkit/tools/AxiomAudit.lean"
 "tools/cert_crypto.py"            = "share/trunkit/tools/cert_crypto.py"
 "tools/cert_formal.py"            = "share/trunkit/tools/cert_formal.py"
+"tools/comparator_check.sh"       = "share/trunkit/tools/comparator_check.sh"
 "tools/compose_match.py"          = "share/trunkit/tools/compose_match.py"
 "tools/demo_bound_tier.py"        = "share/trunkit/tools/demo_bound_tier.py"
 "tools/demo_erdos_1196.py"        = "share/trunkit/tools/demo_erdos_1196.py"
