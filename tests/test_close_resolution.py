@@ -8,11 +8,18 @@ degrade gracefully when it is absent.
 
 from __future__ import annotations
 
+import pathlib
+
+import pytest
+
 from calx import cli
 
+_KAN_IN_KAN = pathlib.Path(__file__).parent.parent / "local" / "tools" / "kan_in_kan.py"
 
+
+@pytest.mark.skipif(not _KAN_IN_KAN.is_file(), reason="local/tools/kan_in_kan.py not present")
 def test_resolve_local_extension_tool():
-    # ships in a repo checkout under local/tools/
+    # present only in a workspace checkout that carries the local/ overlay
     p = cli._resolve_tool("kan_in_kan.py")
     assert p is not None
     assert p.is_file()

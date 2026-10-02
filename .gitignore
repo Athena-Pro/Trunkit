@@ -23,6 +23,10 @@ tests/fixtures/oeis/b*.txt
 *.sql.bak
 *.sql.gz
 
+# Project-specific workspace overlay (see `trunkit init --local`) -- not part of
+# the public library
+local/
+
 # Claude IDE settings
 .claude/
 
