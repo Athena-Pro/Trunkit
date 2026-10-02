@@ -229,7 +229,13 @@ def _cmd_register_lean(args: argparse.Namespace) -> int:
     file_digests = leanbridge.compute_file_digests(root, rels)
     digest = leanbridge.closure_digest(file_digests)
     toolchain = leanbridge.read_toolchain(root)
-    checker = args.checker or leanbridge.default_checker_cmd(args.root, args.decl)
+    if args.checker and args.comparator:
+        print("  error: --checker and --comparator are alternatives; pass one")
+        return 2
+    if args.comparator:
+        checker = leanbridge.comparator_checker_cmd(args.root, args.comparator)
+    else:
+        checker = args.checker or leanbridge.default_checker_cmd(args.root, args.decl)
 
     if not args.write:
         print(f"  [dry-run] would register lean artifact for claim {args.claim_id}")
@@ -250,6 +256,65 @@ def _cmd_register_lean(args: argparse.Namespace) -> int:
         art_id = cur.fetchone()[0]
     print(f"  registered lean artifact {art_id} for claim {args.claim_id} "
           f"({len(rels)} files, decl {args.decl})")
+    return 0
+
+
+def _cmd_bind_statement(args: argparse.Namespace) -> int:
+    """Pin what a Lean-backed claim MEANS: bind its statement closure (117).
+
+    Reads an AxiomAudit verdict (the JSON line lean_check.sh prints) rather
+    than running Lean itself: binding is a deliberate act over a verdict a
+    person has looked at, and the audit is minutes of Mathlib elaboration that
+    has no business hiding inside a bookkeeping command.
+    """
+    from pathlib import Path
+
+    from psycopg.types.json import Jsonb
+
+    from . import leanbridge
+
+    audit = None
+    for line in reversed(Path(args.audit).read_text(encoding="utf-8").splitlines()):
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                audit = json.loads(line)
+                break
+            except json.JSONDecodeError:
+                continue
+    if audit is None:
+        print(f"  error: no AxiomAudit JSON verdict in {args.audit}")
+        return 2
+    manifest = leanbridge.statement_closure(audit)
+    if manifest is None:
+        print("  error: the audit carries no statement_closure (AxiomAudit predates"
+              " 117, or LEAN_AUDIT_NO_CLOSURE was set)")
+        return 2
+    sha = leanbridge.closure_manifest_digest(manifest)
+    decl, type_text = audit.get("decl", ""), audit.get("type", "")
+
+    if not args.write:
+        print(f"  [dry-run] would bind claim {args.claim_id} to the statement closure of {decl}")
+        print(f"    type      : {type_text}")
+        print(f"    closure   : {len(manifest)} constants  sha256={sha[:16]}…")
+        print("  pass --write to bind")
+        return 0
+
+    with db.connect(args.dsn) as conn, conn.cursor() as cur:
+        # The toolchain string must match what the harness records on each
+        # observation (cert_formal.record_closure_observation), or a clean
+        # re-check would report a toolchain change that did not happen.
+        cur.execute("SELECT toolchain FROM cert.artifact WHERE claim_id = %s", (args.claim_id,))
+        row = cur.fetchone()
+        tc = json.dumps(row[0], sort_keys=True) if row and row[0] else ""
+        cur.execute(
+            "SELECT (cert.bind_statement_closure(%s,%s,%s,%s,%s,%s)).id",
+            (args.claim_id, decl, type_text, sha,
+             Jsonb({k: list(v) for k, v in manifest.items()}), tc),
+        )
+        bid = cur.fetchone()[0]
+    print(f"  bound claim {args.claim_id} -> {decl}  (binding {bid}, "
+          f"{len(manifest)} constants, sha256={sha[:16]}…)")
     return 0
 
 
@@ -564,8 +629,19 @@ def build_parser() -> argparse.ArgumentParser:
     rl.add_argument("--root", required=True, help="repo-relative Lake project dir")
     rl.add_argument("--decl", required=True, help="fully-qualified target declaration")
     rl.add_argument("--checker", help="override checker command (e.g. a sandbox wrapper)")
+    rl.add_argument("--comparator", metavar="CONFIG",
+                    help="check with leanprover/comparator against this challenge JSON "
+                         "(relative to --root); Linux-only, reports error elsewhere")
     rl.add_argument("--write", action="store_true", help="register (dry-run without)")
     rl.set_defaults(func=_cmd_register_lean)
+
+    bs = sub.add_parser("bind-statement",
+                        help="pin a Lean claim's statement closure (what it MEANS, not its text)")
+    bs.add_argument("claim_id", type=int)
+    bs.add_argument("--audit", required=True,
+                    help="file holding the AxiomAudit JSON verdict (lean_check.sh stdout)")
+    bs.add_argument("--write", action="store_true", help="bind (dry-run without)")
+    bs.set_defaults(func=_cmd_bind_statement)
 
     cl = sub.add_parser("close", help="reflexive closure — curry fixed points + kan eigenform")
     cl.add_argument("--write", action="store_true",

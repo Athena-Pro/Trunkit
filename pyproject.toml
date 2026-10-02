@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "trunkit"
-version = "0.4.0"
+version = "0.5.0"
 authors = [
   { name = "Athena Kaminsky", email = "thegiantsnail@gmail.com" },
 ]
@@ -30,6 +30,12 @@ classifiers = [
   "Topic :: Database",
 ]
 dependencies = [
+  # Deliberately the PURE-PYTHON psycopg, not psycopg[binary]. The binary wheel
+  # has no build for Termux/ARM and other non-x86 targets, so making it the
+  # default breaks install there outright (see the 0.2.1 fix). A platform marker
+  # is not a way out: packaging markers cannot reliably tell glibc from musl
+  # from Termux/Android. Environments with no system libpq install
+  # `trunkit[binary]` -- which is why that extra exists and is CI-covered.
   "psycopg>=3.2,<4",
 ]
 
@@ -38,6 +44,8 @@ Homepage = "https://github.com/Athena-Pro/Trunkit"
 Repository = "https://github.com/Athena-Pro/Trunkit"
 
 [project.optional-dependencies]
+# The supported zero-system-libpq path. Not redundant with the base dependency:
+# the base stays pure Python so non-x86 targets can install at all.
 binary = [
   "psycopg[binary]>=3.2,<4",
 ]
@@ -48,7 +56,11 @@ image = [
   "pillow>=10",
 ]
 mcp = [
-  "mcp>=1.0.0",
+  # trunkit_mcp currently uses mcp.server.fastmcp, the MCP 1.x API.
+  "mcp>=1.0.0,<2",
+  # MCP 1.x's Settings model warns under pydantic-settings 2.13+ because its
+  # lifespan forward reference is unresolved; warnings are errors in our CI.
+  "pydantic-settings>=2.5.2,<2.13",
 ]
 dev = [
   "psycopg[binary]>=3.2,<4",
@@ -57,7 +69,8 @@ dev = [
   "ruff>=0.6",
   "build>=1.0",
   "twine>=5.0",
-  "mcp>=1.0.0",
+  "mcp>=1.0.0,<2",
+  "pydantic-settings>=2.5.2,<2.13",
 ]
 
 [project.scripts]
@@ -68,9 +81,37 @@ trunkit-mcp = "trunkit_mcp.server:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/calx", "src/nerode", "src/trunkit_mcp"]
 
+# shared-data is a force-include mapping: it does NOT respect .gitignore or the
+# `exclude` list, so a directory mapped here ships whatever happens to be on the
+# builder's disk. Mapping "proofs" wholesale put 8,885 files / 97 MB of Lean
+# .lake build artifacts into 0.4.0 (6.9 GB of them exist locally) -- the exact
+# "3 GB compiler in the box" the README promises is never shipped. Every entry
+# below is therefore a single tracked FILE, not a directory. Adding a tool means
+# adding a line here; that is the cost of a build that cannot leak.
 [tool.hatch.build.targets.wheel.shared-data]
-"tools" = "share/trunkit/tools"
-"proofs" = "share/trunkit/proofs"
+"tools/AxiomAudit.lean"           = "share/trunkit/tools/AxiomAudit.lean"
+"tools/cert_crypto.py"            = "share/trunkit/tools/cert_crypto.py"
+"tools/cert_formal.py"            = "share/trunkit/tools/cert_formal.py"
+"tools/comparator_check.sh"       = "share/trunkit/tools/comparator_check.sh"
+"tools/compose_match.py"          = "share/trunkit/tools/compose_match.py"
+"tools/demo_bound_tier.py"        = "share/trunkit/tools/demo_bound_tier.py"
+"tools/demo_erdos_1196.py"        = "share/trunkit/tools/demo_erdos_1196.py"
+"tools/erdos_straus.py"           = "share/trunkit/tools/erdos_straus.py"
+"tools/factorial_homology.py"     = "share/trunkit/tools/factorial_homology.py"
+"tools/figure_extract.py"         = "share/trunkit/tools/figure_extract.py"
+"tools/fraction_families.py"      = "share/trunkit/tools/fraction_families.py"
+"tools/general_fraction_families.py" = "share/trunkit/tools/general_fraction_families.py"
+"tools/image_features.py"         = "share/trunkit/tools/image_features.py"
+"tools/lean_check.sh"             = "share/trunkit/tools/lean_check.sh"
+"tools/oeis_loader.py"            = "share/trunkit/tools/oeis_loader.py"
+"tools/oeis_match.py"             = "share/trunkit/tools/oeis_match.py"
+"tools/prime_members_functor.py"  = "share/trunkit/tools/prime_members_functor.py"
+"tools/seq_homology.py"           = "share/trunkit/tools/seq_homology.py"
+"tools/verify_bundle.py"          = "share/trunkit/tools/verify_bundle.py"
+"proofs/combined_signature.py"    = "share/trunkit/proofs/combined_signature.py"
+"proofs/equipment.py"             = "share/trunkit/proofs/equipment.py"
+"proofs/gap_homology_primes.py"   = "share/trunkit/proofs/gap_homology_primes.py"
+"proofs/perfect_28.py"            = "share/trunkit/proofs/perfect_28.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

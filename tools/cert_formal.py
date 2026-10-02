@@ -220,10 +220,17 @@ def append_certificate(cur, claim_id, status, evidence, valid_under, statement, 
     return seq
 
 
-def verify_lean(project_root, file_digests, trusted, checker_cmd, toolchain):
+def verify_lean(project_root, file_digests, trusted, checker_cmd, toolchain,
+                closure_sink=None):
     """Re-check a Lean artifact: closure-drift gate, then build+axiom audit.
 
     Returns (status, evidence, extra_valid_under). Pure of DB side effects.
+
+    If the auditor emitted a statement closure and ``closure_sink`` is a dict,
+    it is filled with ``manifest``/``sha256``/``type`` for the caller to record
+    (record_closure_observation). The manifest is thousands of rows for a real
+    statement, so it goes to the content-addressed store, not the certificate;
+    the certificate carries its digest.
     """
     root = (PROJECT_DIR / project_root).resolve()
     extra_vu = {"toolchain": toolchain}
@@ -277,6 +284,16 @@ def verify_lean(project_root, file_digests, trusted, checker_cmd, toolchain):
         "artifact_sha256": current,
         "kind": "lean",
     }
+    # Exit 2 is the checker saying it could not RUN (bad usage, decl not found,
+    # comparator prerequisites missing) -- lean_check.sh documents it as
+    # `error`. Reading it as `refuted` would turn "this machine has no landrun"
+    # into "this proof is wrong".
+    if proc.returncode == 2:
+        evidence["reason"] = "checker could not run (exit 2)"
+        if audit is not None:
+            evidence["checker_error"] = audit.get("error")
+        return "error", evidence, extra_vu
+
     if audit is None:
         evidence["reason"] = "no JSON verdict from lean checker"
         return "error", evidence, extra_vu
@@ -289,11 +306,51 @@ def verify_lean(project_root, file_digests, trusted, checker_cmd, toolchain):
         "axioms": axioms,
         "uses_sorry": uses_sorry,
         "allow_native": LEAN_ALLOW_NATIVE,
+        "checker": audit.get("checker", "axiom_audit"),
     })
+    if audit.get("kernels"):
+        evidence["kernels"] = audit["kernels"]
+
+    manifest = leanbridge.statement_closure(audit)
+    if manifest is not None:
+        sha = leanbridge.closure_manifest_digest(manifest)
+        evidence["statement_closure"] = {"sha256": sha, "n_constants": len(manifest)}
+        if closure_sink is not None:
+            closure_sink.update(manifest=manifest, sha256=sha, type=audit.get("type"))
     ok = (proc.returncode == 0) and leanbridge.audit_ok(
         axioms, uses_sorry, allow_native=LEAN_ALLOW_NATIVE
     )
     return ("valid" if ok else "refuted"), evidence, extra_vu
+
+
+def record_closure_observation(cur, claim_id, sink, artifact_digest, toolchain):
+    """Record an observed statement closure and read the binding verdict back.
+
+    Returns the 117 probe's ``{"ok": ..., ...evidence}`` or ``None`` when the
+    ledger predates 117. ``ok`` is None when the claim has no closure binding:
+    the observation is kept (the manifest is content-addressed) but there is
+    nothing to compare it to, and this harness does not bind on first use --
+    `trunkit bind-statement` is the deliberate act that says "this is what the
+    claim means".
+    """
+    cur.execute("SELECT to_regprocedure('cert.observe_statement_closure("
+                "bigint,text,jsonb,text,text,text)')")
+    if cur.fetchone()[0] is None:
+        return None
+    tc = json.dumps(toolchain, sort_keys=True) if toolchain else ""
+    cur.execute(
+        "SELECT cert.observe_statement_closure(%s,%s,%s,%s,%s,%s)",
+        (claim_id, sink["sha256"],
+         Jsonb({k: list(v) for k, v in sink["manifest"].items()}),
+         sink.get("type"), artifact_digest or "", tc),
+    )
+    if cur.fetchone()[0] is None:
+        return {"ok": None,
+                "reason": "statement closure observed but not bound -- run "
+                          "`trunkit bind-statement` to pin what this claim means"}
+    cur.execute("SELECT ok, evidence FROM cert.statement_bound(%s)", (claim_id,))
+    ok, ev = cur.fetchone()
+    return {"ok": ok, **(ev or {})}
 
 
 def main() -> int:
@@ -352,11 +409,23 @@ def main() -> int:
                 }
 
                 if kind == "lean":
+                    sink: dict = {}
                     status, evidence, extra_vu = verify_lean(
                         project_root or path, file_digests, trusted,
-                        checker_cmd, toolchain,
+                        checker_cmd, toolchain, closure_sink=sink,
                     )
                     vu.update(extra_vu)
+                    if sink:
+                        binding = record_closure_observation(
+                            cur, claim_id, sink, vu.get("artifact_sha256"), toolchain)
+                        if binding is not None:
+                            evidence["statement_binding"] = binding
+                            # A proof of a statement that no longer means what
+                            # the claim says is not a proof of the claim, however
+                            # clean its axioms are.
+                            if binding["ok"] is False and status == "valid":
+                                status = "refuted"
+                                evidence["reason"] = binding.get("reason")
                 else:
                     fpath = (PROJECT_DIR / path).resolve()
                     if not fpath.is_file():

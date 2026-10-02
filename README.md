@@ -90,6 +90,20 @@ trunkit generate --limit 10000
 trunkit standing
 ```
 
+The base install depends on **pure-Python psycopg**, which keeps Trunkit
+installable on Termux/ARM and other targets that have no `psycopg[binary]`
+wheel — but it does expect a system `libpq`. If you don't have one (slim Linux
+images, `python:*-slim`, distroless, most containers), install the binary
+runtime instead:
+
+```bash
+pip install "trunkit[binary]"   # bundles libpq; no system PostgreSQL client needed
+```
+
+Install `trunkit[mcp]` to add the optional `trunkit-mcp` server, or
+`trunkit[binary,mcp]` for both. CI smoke-tests the `[binary]` and
+`[binary,mcp]` wheel installs on Linux.
+
 `trunkit quickstart --compose-only` just writes the compose file if you'd
 rather start the databases yourself; already-running instances are picked up
 via `$CALX_DSN` / `$NERODE_DSN`.

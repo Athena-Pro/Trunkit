@@ -13,21 +13,17 @@ down:
 	docker compose down
 
 ## Apply Trunkit (calx/kan/curry/cert) schemas — idempotent
-## LC_ALL=C sort -n: numeric prefix order (99_ < 100_), matching calx.db.schema_order
+## Use the package loader so 2- and 3-digit migrations share one tested order.
 apply-trunkit:
-	@for f in $$(ls src/calx/sql/*.sql | LC_ALL=C sort -n); do \
-		echo "  $$f"; \
-		psql "$(TRUNK_DSN)" -f "$$f" -q; \
-	done
-	@echo "Trunkit schema applied."
+	trunkit --dsn "$(TRUNK_DSN)" init
 
 ## Apply Nerode (automata/session/porter) schemas — idempotent
+## Same reason as apply-trunkit: nerode.db.SCHEMA_FILES is the ordering
+## authority. Plain `sort` happens to be correct only while no file reaches
+## three digits, and it cannot express that the letter-prefixed phases (A*/B*/C*)
+## are dependency-ordered rather than alphabetical.
 apply-nerode:
-	@for f in $$(ls src/nerode/sql/*.sql | sort); do \
-		echo "  $$f"; \
-		psql "$(NERODE_DSN)" -f "$$f" -q; \
-	done
-	@echo "Nerode schema applied."
+	nerode --dsn "$(NERODE_DSN)" close --apply
 
 ## Apply all schemas for both databases
 apply: apply-trunkit apply-nerode
