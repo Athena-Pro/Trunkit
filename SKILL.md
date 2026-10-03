@@ -595,3 +595,171 @@ Three labs are co-resident: interlace (operator closure, depth 61), hypergroup (
 **Crown consensus — OCTT (step 118).** `cert.evidence_vote` + `cert.crown_consensus(claim, topology[, k])`. Competing evidence from different models adjudicated by Open Crown topology (`veto`=max, `parallel`=min, `series`=sum, `threshold`=k-of-n). The partial-closure window → **`contested`** (models disagree; neither fake-green nor flat-refuted). `K*` = evidence budget to close the crown.
 
 **SQL-generation guardrails.** `docs/CERT_SQL_GENERATION_GUARDRAILS.md` — when LLM-generating cert SQL: prune / minify / adaptive-route; **never** identifier-mask or aggressively compress (semantic drift).
+
+---
+
+## nerode — automata engine
+
+> Connection: `NERODE_DSN=postgresql://nerode:nerode@localhost:5435/nerode`
+> Apply the schema (idempotent): `nerode --dsn "$NERODE_DSN" close --apply`
+
+Nerode stores finite automata as first-class PostgreSQL rows: regex → minimal DFA,
+minimization, product, equivalence, and session-level pattern tracking.
+
+### Core tables
+
+| Table | Purpose |
+|-------|---------|
+| `nerode.alphabets` | Named symbol sets (`name`, `symbols TEXT[]`) |
+| `nerode.automata` | One row per automaton (`name`, `type` DFA/NFA/NFA_E/PDA, `alphabet_id`, `state_count`, `certified`, `source_regex`, `provenance`) |
+| `nerode.states` | `(automaton_id, state_id, label, is_initial, is_accepting)` |
+| `nerode.transitions` | `(automaton_id, from_state, symbol, to_state)`; `symbol IS NULL` = ε-transition |
+| `nerode.construction_log` | Append-only operation log |
+| `nerode.sequence_cache` | `seq_key` → pre-computed JSONB `result` |
+
+### Building and running DFAs
+
+```sql
+-- Regex → minimal DFA; returns the automaton id.
+-- Syntax: literals a–z A–Z 0–9 _, | union, * + ? postfix, () grouping.
+SELECT nerode.from_regex('(a|b)*abb', 'ends_abb');
+
+-- Run a DFA on a string of single-character symbols; returns the final state_id
+SELECT nerode.run_to_state(dfa_id, 'aabba');
+
+-- Run on multi-character symbols (e.g. the paired metric_x_control alphabet)
+SELECT nerode.run_to_state_arr(dfa_id, ARRAY['UA','D_','U_']);
+
+-- Minimize (Hopcroft); returns a new automaton id
+SELECT nerode.minimize(dfa_id);
+
+-- Product construction: 'intersection' | 'union' (both DFAs must share an alphabet)
+SELECT nerode.product(dfa1_id, dfa2_id, 'intersection');
+
+-- Complement, and language equivalence with a distinguishing witness
+SELECT nerode.complement(dfa_id);
+SELECT * FROM nerode.equivalent(dfa1_id, dfa2_id);
+
+-- Export as self-contained JSON (same format as `nerode export`)
+SELECT nerode.export_json(dfa_id);
+```
+
+CLI equivalents: `nerode build --regex PATTERN [--name NAME]`, `min ID`, `equiv ID1 ID2`,
+`run ID --input STRING`, `export ID`, `import FILE`, `verify CLAIM_ID`.
+
+### Session DFAs (Porter handoff)
+
+Tool-call events are logged per session and matched against two built-in DFAs
+(`session_calx_loop` = `P{10,}`, `session_edit_loop` = `(Rf){2,}`); a match fires
+`NOTIFY nerode_session_warn`.
+
+```sql
+-- event ∈ 'read' | 'edit' | 'powershell' | 'fail' | 'pass'
+SELECT nerode.log_event('session-abc', 'read');
+
+-- Current state of a session DFA (replays the last p_window events)
+SELECT nerode.session_dfa_state('session-abc', 'session_edit_loop');
+
+-- Close the session: certifies DFA states + cache keys (cert method
+-- 'session_close') and returns the handoff envelope as JSONB
+SELECT nerode.close_session('session-abc');
+
+-- Open an envelope as the next model: re-verifies the certificate and inlines
+-- every cached value. Returns {prior_session, dfa_context, resolved, handoff_v}.
+SELECT nerode.open_session(:envelope::jsonb, 'session-def');
+```
+
+### Cybernetic DFAs
+
+Pattern-matching over metric and control signals. Three alphabets: `metric` `{U,D,S}`
+(rise / fall / stable), `control` `{A,R,_}` (action / response / neither),
+`homeostasis` `{I,O}` (inside / outside band).
+
+```sql
+-- Build a dead_time DFA for arbitrary k (idempotent); name: dead_time_7
+SELECT nerode.ensure_dead_time(7);
+
+-- Append one symbol and scan that alphabet's DFAs;
+-- a match fires pg_notify('nerode_control_warn', ...)
+SELECT nerode.log_cybernetic('session-abc', 'metric', 'U', '{"src":"cpu"}'::jsonb);
+```
+
+| DFA | Alphabet | Pattern | Meaning |
+|-----|----------|---------|---------|
+| `metric_rise_3` | metric | `U{3,}` | 3+ consecutive rises |
+| `metric_oscillate` | metric | `(UD){3,}` | oscillation / gain too high |
+| `metric_bounce_3` | metric | `D{3,}U{3,}` | V-shape setpoint search |
+| `dead_time_5` / `_10` / `_20` | control | `A_{k,}` | action without response in k steps |
+| `homeostasis_alarm_5` | homeostasis | `O{5,}` | 5+ steps outside target band |
+| `homeostasis_stable_5` | homeostasis | `O+I{5,}` | convergence: outside, then inside 5+ steps |
+| `dead_time_5_x_metric_oscillate` | metric_x_control | composite | oscillating AND unresponsive |
+
+### Composite DFAs (paired alphabet)
+
+`nerode.product()` needs a shared alphabet, so cross-alphabet patterns go through the
+paired alphabet `metric_x_control` (`UA UR U_ DA DR D_ SA SR S_`):
+
+```sql
+SELECT nerode.ensure_composite_cybernetic(
+    'my_composite',
+    'metric_oscillate', 1,   -- component 1: first char of each pair (metric side)
+    'dead_time_5',      2    -- component 2: second char (control side)
+);
+```
+
+Each component DFA is projected onto the paired alphabet
+(`nerode.project_to_paired`), then combined with `nerode.product(..., 'intersection')`.
+
+---
+
+## Porter — agent context handoff
+
+Porter pre-packs external data and session state into a cert-backed envelope before
+a session ends. The next model opens the envelope with zero tool calls.
+
+```python
+from nerode.precache import Precacher
+from nerode.sources import WeatherSource, TickerSource, HNSource, TickerHistorySource
+
+# Model A — fetch and pack
+with Precacher("brief-2026-05-19") as pc:
+    pc.fetch("weather:london", WeatherSource(51.5, -0.1, label="London"))
+    pc.fetch("ticker:AAPL",    TickerSource("AAPL"))
+    pc.fetch("news:hn:top5",   HNSource(5))
+    pc.fetch("history:AAPL",   TickerHistorySource("AAPL", range_="5d"))
+
+envelope = pc.envelope              # set when the block exits cleanly
+
+# Model B — arrive with full context
+ctx = Precacher.open(envelope, "model-b-001")
+resolved = ctx["resolved"]          # every pre-cached key, ready to use
+prior    = ctx["prior_session"]     # includes cert_valid
+```
+
+### Sources
+
+| Source | Fetches |
+|--------|---------|
+| `WeatherSource(lat, lon, *, variables=None, label=None)` | Open-Meteo current conditions |
+| `TickerSource(symbol, *, interval="1d", range_="1d")` | Yahoo Finance quote |
+| `TickerHistorySource(symbol, *, range_="5d")` | Daily closes, direction encoded as metric symbols `U`/`D`/`S` |
+| `HNSource(n=10, *, tags="front_page")` | Hacker News stories (Algolia API) |
+| `HttpSource(url, *, headers=None, params=None)` | JSON over HTTP(S) (`nerode.adapters`) |
+| `CallableSource(fn, *, args=(), kwargs=None)` | Return value of any sync or async callable (`nerode.adapters`) |
+
+`fetch()` also accepts a bare URL string or a callable. Sources make real network
+requests.
+
+### Precacher API
+
+```python
+pc = Precacher(session_id=None, *, dsn=None)   # dsn defaults to NERODE_DSN
+pc.connect()
+pc.store(key, value)                    # store a pre-computed value directly
+pc.fetch(key, source, retries=2)        # resolve the source, then store
+envelope = pc.close(attention_hint="…") # nerode.close_session(); returns the envelope
+ctx = pc.open_for("model-b-001")        # nerode.open_session() on this connection
+pc.disconnect()
+
+Precacher.open(envelope, new_session_id, *, dsn=None)   # Model B, own connection
+```
