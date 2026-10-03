@@ -586,12 +586,12 @@ Three labs are co-resident: interlace (operator closure, depth 61), hypergroup (
 - `cert.kan_engines_all_true()` (step 79): empty engine → `unverified`, not `refuted`.
 - `cert.law_view_holds` / `cert.is_perfect` (step 90): equip NULL-probe claims for verification.
 
-**Subject-existence guard (Tier 1, step 93).** `cert.subject_probe` + `tools/tel_subject_guard.py [--repoint]`. A `tel_project` probe gates on subject existence: a moved/deleted subject → `unverified`, never a stale green.
+**Subject-existence guard (Tier 1, step 118).** `cert.subject_probe` + `tools/tel_subject_guard.py [--repoint]`. A `tel_project` probe gates on subject existence: a moved/deleted subject → `unverified`, never a stale green.
 
-**Live build/test (Tier 2, step 93).** `cert.live_build` + `tools/tel_build_check.py [--only ID]`. "valid" means *built today* (cargo / rebar3 / mix run), not asserted. Toolchain-not-invocable → `unverified` (never a false `refuted`).
+**Live build/test (Tier 2, step 118).** `cert.live_build` + `tools/tel_build_check.py [--only ID]`. "valid" means *built today* (cargo / rebar3 / mix run), not asserted. Toolchain-not-invocable → `unverified` (never a false `refuted`).
 
-**Status board (step 93).** `cert.board` / `cert.board_summary` → plain-language areas + verdicts. `python local/tools/gen_status.py` regenerates `docs/reports/STATUS.md` — the single layperson surface.
+**Status board (step 118).** `cert.board` / `cert.board_summary` → plain-language areas + verdicts. Core maps the library's own subject kinds (everything else → `Other`); a workspace overlay can re-declare `cert.board` with more areas, keeping the same columns. `python local/tools/gen_status.py` regenerates `docs/reports/STATUS.md` — the single layperson surface.
 
-**Crown consensus — OCTT (step 93).** `cert.evidence_vote` + `cert.crown_consensus(claim, topology[, k])`. Competing evidence from different models adjudicated by Open Crown topology (`veto`=max, `parallel`=min, `series`=sum, `threshold`=k-of-n). The partial-closure window → **`contested`** (models disagree; neither fake-green nor flat-refuted). `K*` = evidence budget to close the crown.
+**Crown consensus — OCTT (step 118).** `cert.evidence_vote` + `cert.crown_consensus(claim, topology[, k])`. Competing evidence from different models adjudicated by Open Crown topology (`veto`=max, `parallel`=min, `series`=sum, `threshold`=k-of-n). The partial-closure window → **`contested`** (models disagree; neither fake-green nor flat-refuted). `K*` = evidence budget to close the crown.
 
 **SQL-generation guardrails.** `docs/CERT_SQL_GENERATION_GUARDRAILS.md` — when LLM-generating cert SQL: prune / minify / adaptive-route; **never** identifier-mask or aggressively compress (semantic drift).
