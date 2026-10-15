@@ -86,8 +86,8 @@ From pip (requires Docker for the bundled databases):
 ```bash
 pip install trunkit   # installs both the trunkit and nerode CLIs
 trunkit quickstart      # writes docker-compose.yml, starts both DBs, applies both schemas
-trunkit generate --limit 10000
-trunkit standing
+trunkit --dsn postgresql://trunk:trunk@localhost:5434/trunk generate --limit 10000 --backend pure
+trunkit --dsn postgresql://trunk:trunk@localhost:5434/trunk standing
 ```
 
 The base install depends on **pure-Python psycopg**, which keeps Trunkit
@@ -105,8 +105,13 @@ Install `trunkit[mcp]` to add the optional `trunkit-mcp` server, or
 `[binary,mcp]` wheel installs on Linux.
 
 `trunkit quickstart --compose-only` just writes the compose file if you'd
-rather start the databases yourself; already-running instances are picked up
-via `$CALX_DSN` / `$NERODE_DSN`.
+rather start the databases yourself. Existing instances are selected through
+`CALX_DSN` / `NERODE_DSN`, or `trunkit --dsn TRUNK_DSN quickstart --nerode-dsn NERODE_DSN`.
+Quickstart starts only containers without an explicit connection; when both
+connections are supplied, Docker is optional. It prints follow-up commands
+using the same connections. Other Trunkit commands use `CALX_DSN` or their
+native default on port 5432, so keep the printed `--dsn` option when using
+the generated container on port 5434.
 
 From a repo checkout:
 
@@ -117,15 +122,18 @@ docker compose up -d db-trunkit db-nerode
 # 2. Apply all schemas (idempotent)
 make apply
 
-# 3. Trunkit: populate integers and run reflexive closure
-trunkit generate --limit 10000
-trunkit close --write
+# 3. Check exact arithmetic, DFA execution, and a Porter handoff
+make check
 
-# 4. Porter: pre-pack a morning brief and open it as Model B
-python scripts/morning_brief_demo.py
+# 4. Populate integers with the bundled pure-Python backend
+trunkit --dsn postgresql://trunk:trunk@localhost:5434/trunk generate --limit 10000 --backend pure
 ```
 
-Environment variable: `CALX_DSN=postgresql://trunk:trunk@localhost:5434/trunk`
+The smoke checks are also shipped in the wheel and require no network sources:
+`python -m calx.smoke --trunk-dsn TRUNK_DSN --nerode-dsn NERODE_DSN`.
+They verify a cached brief survives a certified close/open handoff, then roll
+back the demo transactions. Set `CALX_DSN` / `NERODE_DSN` to reuse these connections
+without passing options.
 
 ---
 
@@ -153,9 +161,10 @@ trunkit export <id> [<id> ...]
 
 trunkit verify --bundle FILE [--offline]
 # Consumer side of export: re-verifies a received bundle.
-# Replays each embedded probe against YOUR database (rolled back after),
-# checks witness presence, and verifies artifact sha256 hashes against
-# local files. --offline skips probe replay (structural checks only).
+# Replays each embedded probe in a bounded read-only transaction, checks
+# supported witness kernels, artifact hashes, lifecycle, and every premise.
+# --offline skips SQL replay; supported witnesses still verify independently.
+# Unknown witness schemas remain UNVERIFIED. Artifact identity alone is not proof.
 # Three-valued per claim: VALID / REFUTED / UNVERIFIED. Exits 0 iff all valid.
 ```
 
@@ -316,6 +325,7 @@ Beyond integer-fact and categorical claims, cert ships re-checkable, **exact** c
 | Consumer re-verifies | `cert.verify(claim_id)` replays without INSERTing — safe for untrusted callers |
 | Bundle is portable | `cert.export_bundle(ids[])` emits self-contained JSONB: claims + certs + witnesses + derivations |
 | Certificates have a lifecycle | `cert.revoke[_claim]` appends a revocation (never mutates); `SET trunkit.cert_ttl` stamps a validity window inside the hash-committed `valid_under`; `SET trunkit.signer` binds an identity. `cert.standing.effective_status` reads `revoked` / `expired`; revocation is loss of trust, **not** refutation |
+| Certificates bind exact claim versions | New certificates carry a semantic claim digest in `valid_under`; `cert.claim_version` retains immutable snapshots. Consumers detect changed statements, subjects, methods, probes, or domains. Existing certificates remain explicitly unbound; a digest does not authenticate its producer |
 
 ---
 

@@ -5,7 +5,7 @@
 -- Consumes the envelope produced by nerode.close_session() and returns a
 -- structured context object that a model can use without further tool calls:
 --
---   • cert verification   — probe_sql re-run; cert_valid flag in context
+--   • cert verification   — exact stored witness + DFA replay; cert_valid flag
 --   • pre-cached values   — all cache_keys fetched and inlined as resolved{}
 --   • enriched DFA state  — label + pattern appended to each state_id so
 --                           the model can interpret the session history
@@ -17,6 +17,41 @@
 -- =============================================================================
 
 
+-- Bind an envelope to one exact certificate and its trace witness. A valid
+-- probe for some other claim does not authenticate caller-supplied context.
+CREATE OR REPLACE FUNCTION nerode.verify_handoff(p_envelope JSONB)
+RETURNS BOOLEAN LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_witness JSONB;
+BEGIN
+    IF p_envelope->>'handoff_v' IS DISTINCT FROM '1' THEN
+        RETURN FALSE;
+    END IF;
+    SELECT w.body INTO v_witness
+    FROM cert.claim c
+    JOIN cert.certificate ce ON ce.claim_id = c.id
+    JOIN cert.witness w ON w.certificate_id = ce.id
+    WHERE c.id = (p_envelope->>'cert_bundle_id')::bigint
+      AND ce.id = (p_envelope->>'cert_certificate_id')::bigint
+      AND c.subject_kind = 'nerode_session' AND c.method = 'session_close'
+      AND c.subject_ref->>'session_id' = p_envelope->>'session_id'
+      AND ce.status = 'valid' AND w.kind = 'trace';
+    IF NOT FOUND OR v_witness->>'session_id' IS DISTINCT FROM p_envelope->>'session_id'
+       OR v_witness->'dfa_states' IS DISTINCT FROM p_envelope->'session_dfa_states'
+       OR v_witness->'cache_keys' IS DISTINCT FROM p_envelope->'cache_keys'
+       OR v_witness->'ledger_binding' IS DISTINCT FROM p_envelope->'ledger_binding'
+       OR v_witness->'attention_hint' IS DISTINCT FROM p_envelope->'attention_hint' THEN
+        RETURN FALSE;
+    END IF;
+    RETURN nerode.session_dfa_state(p_envelope->>'session_id', 'session_calx_loop')
+               IS NOT DISTINCT FROM (v_witness->'dfa_states'->>'session_calx_loop')::int
+       AND nerode.session_dfa_state(p_envelope->>'session_id', 'session_edit_loop')
+               IS NOT DISTINCT FROM (v_witness->'dfa_states'->>'session_edit_loop')::int;
+EXCEPTION WHEN OTHERS THEN
+    RETURN FALSE;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION nerode.open_session(
     p_envelope       JSONB,
     p_new_session_id TEXT DEFAULT NULL
@@ -25,7 +60,6 @@ RETURNS JSONB
 LANGUAGE plpgsql AS $$
 DECLARE
     v_claim_id   BIGINT;
-    v_probe_sql  TEXT;
     v_cert_valid BOOLEAN;
     v_dfa_states JSONB;
     v_enriched   JSONB;
@@ -33,22 +67,24 @@ DECLARE
     v_prior      JSONB;
     v_context    JSONB;
 BEGIN
-    v_claim_id   := (p_envelope ->> 'cert_bundle_id')::BIGINT;
-    v_dfa_states := COALESCE(p_envelope -> 'session_dfa_states', '{}'::JSONB);
+    v_cert_valid := nerode.verify_handoff(p_envelope);
+    IF v_cert_valid THEN
+        v_claim_id := (p_envelope->>'cert_bundle_id')::bigint;
+        v_dfa_states := COALESCE(p_envelope->'session_dfa_states', '{}'::jsonb);
+    ELSE
+        -- Invalid envelopes must neither resolve arbitrary cache keys nor
+        -- append a receipt event before the caller can inspect the failure.
+        RETURN jsonb_build_object(
+            'handoff_v', 1,
+            'prior_session', jsonb_build_object('cert_valid', FALSE),
+            'dfa_context', '{}'::jsonb, 'resolved', '{}'::jsonb);
+    END IF;
 
     -- ── Step 1: verify the cert ───────────────────────────────────────────────
-    -- Executes probe_sql stored in cert.claim — a single SELECT that returns
-    -- TRUE iff the DFA states still match a fresh replay of the session log.
-    v_cert_valid := NULL;
-    IF v_claim_id IS NOT NULL THEN
-        SELECT probe_sql INTO v_probe_sql
-        FROM   cert.claim
-        WHERE  id = v_claim_id;
-
-        IF v_probe_sql IS NOT NULL THEN
-            EXECUTE v_probe_sql INTO v_cert_valid;
-        END IF;
-    END IF;
+    -- The exact stored certificate/witness is matched to the envelope and its
+    -- DFA states are replayed without executing producer-authored SQL.
+    -- verify_handoff checked the exact stored certificate and bound context;
+    -- no producer-authored probe_sql is executed by the consumer here.
 
     -- ── Step 2: fetch pre-cached values ───────────────────────────────────────
     -- All cache_keys in the envelope are resolved in one indexed scan.

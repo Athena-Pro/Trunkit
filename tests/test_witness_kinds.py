@@ -29,6 +29,7 @@ EXPECTED_KINDS = {
     "quote_span",
     "construction_record", "computation_trace",
     "nerode_partition", "bisimulation", "state_map",
+    "payoff_trace", "monotonicity_probe", "gate_decision", "ledger_snapshot",
     "betti",
 }
 
@@ -52,6 +53,26 @@ def test_authoritative_lists_are_identical():
 def test_authoritative_list_covers_every_writer():
     for path in AUTHORITIES:
         assert constraint_kinds(path) == EXPECTED_KINDS
+
+    # Inspect the producers too: duplicating the same outdated vocabulary in
+    # the constraint and EXPECTED_KINDS used to miss entire certificate layers.
+    produced = set()
+    for sql_dir in (CALX_SQL, NERODE_SQL):
+        for writer in sql_dir.glob("*.sql"):
+            sql = writer.read_text(encoding="utf-8")
+            produced.update(re.findall(r"p_witness_kind\s*=>\s*'([a-z_]+)'", sql))
+            for insert in re.finditer(
+                r"INSERT INTO cert\.witness\s*\([^;]*?\)\s*VALUES\s*\((.*?)\);",
+                sql, re.DOTALL | re.IGNORECASE,
+            ):
+                # Fixed kinds are the quoted second VALUES argument. Other
+                # inserts forward a validated/parameterized kind.
+                kind = re.match(r"\s*[^,]+,\s*'([a-z_]+)'\s*,", insert.group(1))
+                if kind:
+                    produced.add(kind.group(1))
+    assert produced <= EXPECTED_KINDS, (
+        f"unregistered witness producers: {produced - EXPECTED_KINDS}"
+    )
 
 
 def test_no_other_file_touches_the_constraint():

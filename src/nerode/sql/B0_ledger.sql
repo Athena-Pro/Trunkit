@@ -43,7 +43,11 @@ CREATE OR REPLACE FUNCTION nerode.ledger_absorb(
     p_schema_type  TEXT   DEFAULT NULL,
     p_source_event BIGINT DEFAULT NULL)
 RETURNS VOID
-LANGUAGE sql AS $$
+LANGUAGE plpgsql AS $$
+BEGIN
+    -- Serialize absorbs with carried-ledger validation/restoration for the
+    -- same session. Unrelated sessions remain independent.
+    PERFORM pg_advisory_xact_lock(hashtextextended('nerode.ledger:' || p_session_id, 0));
     INSERT INTO nerode.ledger_state (session_id, path, value, schema_type, source_event, observed_at)
     VALUES (p_session_id, p_path, p_value, p_schema_type, p_source_event, now())
     ON CONFLICT (session_id, path) DO UPDATE
@@ -51,6 +55,7 @@ LANGUAGE sql AS $$
             schema_type  = COALESCE(EXCLUDED.schema_type, nerode.ledger_state.schema_type),
             source_event = COALESCE(EXCLUDED.source_event, nerode.ledger_state.source_event),
             observed_at  = now();
+END;
 $$;
 
 COMMENT ON FUNCTION nerode.ledger_absorb(TEXT, TEXT, JSONB, TEXT, BIGINT) IS

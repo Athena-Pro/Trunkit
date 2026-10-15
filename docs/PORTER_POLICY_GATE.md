@@ -2,7 +2,9 @@
 
 *Design note. Primary source: Md Nayem Uddin et al., "LedgerAgent: Structured State for Policy-Adherent Tool-Calling Agents," [arXiv:2606.20529](https://arxiv.org/abs/2606.20529). Hardening borrows from "Sovereign Execution Brokers" ([2606.20520](https://arxiv.org/abs/2606.20520), validity windows + live-state drift) and "ContractGuard" ([2606.18550](https://arxiv.org/abs/2606.18550), the gate is only as honest as its inputs ⇒ pin them in the witness).*
 
-Status: starter increment. Four runnable SQL files (`B0`–`B3`) plus a Python `Warden` API. Nothing is wired into `db.py` until §6, so the files are inert until then.
+Status: `B0`–`B4` and the unified `C0` verifier are wired into `db.py`.
+Regression tests run against a dedicated scratch PostgreSQL database; see
+`tests/test_porter_security.py`.
 
 ---
 
@@ -109,13 +111,19 @@ The verdict maps to `GateFilter`'s `(a', g)`: `ALLOW` keeps the call; `REVISE` r
 `certify_gate(session, tool, args) → claim_id` records the decision as a `cert.claim` + `certificate` + `witness` (mirroring `close_session`), with:
 
 - **status** = the three-valued map (`ALLOW→valid`, `BLOCK→refuted`, `REVISE→unverified`);
-- **witness** (`kind='gate_decision'`) = the pinned ledger snapshot + args + per-rule results;
+- **witness** (`kind='gate_decision'`) = the pinned ledger snapshot + args + per-rule results + full policy revision/hash;
 - **probe_sql** = `SELECT nerode.replay_gate(<witness>)` — so a consumer re-evaluates the *same predicates against the pinned snapshot* and must reach the same verdict, with no trust in the producer (ContractGuard).
 
 Two SEB borrows make the decision a *short-lived, revocable* capability rather than a forever-true fact:
 
-- **Live-state drift.** `gate_drift(session, witness)` recomputes `md5(ledger_render(session))` and compares it to the witness's `ledger_hash`. An `ALLOW` is only valid against the snapshot it was made on; if the ledger has changed, the decision is stale and the action must be re-gated before it fires. This is SEB's "live-state drift" check.
-- **Validity window.** The certificate's `valid_under` carries `decided_at` and the `ledger_hash`; a caller can attach a TTL/epoch and treat the ALLOW as expired past it.
+- **Live-state drift.** `gate_drift(session, witness)` compares both the current ledger hash and current policy hash with the decision. Changes to predicates, enabled rules, or tool registration require a fresh decision.
+- **Validity window.** Decisions expire after five minutes. `gate_current(session, witness)` requires an exact stored valid certificate witness, historical replay, unchanged state/policy, the matching session, and an unexpired validity window. Check it immediately before dispatch; it does not make a remote action atomic with the database check.
+
+`certify_gate_decision` evaluates once, pins the policy revision in the append-only
+`nerode.policy_snapshot` table, records the certificate, and returns its exact
+decision. Historical replay uses that trusted stored revision, so policy edits
+do not rewrite history and an untrusted witness cannot introduce executable SQL.
+Registered changing tools with no enabled governing rules return `REVISE`.
 
 ---
 
@@ -126,17 +134,29 @@ Mirrors `Precacher`'s style so Porter users get one idiom:
 ```python
 from nerode.warden import Warden
 
-w = Warden("sess-julia")
-w.absorb("reservation.UX789", reservation_json, schema_type="reservation")  # Absorb
-ctx = w.render()                                                            # Render → prompt
-decision = w.gate("cancel_reservation", {"reservation_id": "UX789"})        # GateFilter
-# decision.verdict ∈ {ALLOW, REVISE, BLOCK}; decision.feedback; decision.claim_id
-if decision.verdict != "ALLOW":
-    # do not call the tool; surface decision.feedback to the model
-    ...
+with Warden("sess-julia") as w:
+    w.absorb("reservation", reservation_json, schema_type="reservation")
+    ctx = w.render()
+    decision = w.gate("cancel_reservation", {"reservation_id": "UX789"})
+    if w.can_execute(decision):
+        ...  # dispatch the proposed call immediately
+    else:
+        ...  # refresh state / re-gate, or surface decision.feedback
 ```
 
-`absorb` calls `ledger_absorb`, `render` calls `ledger_render`, `gate` calls `certify_gate` and returns the verdict + feedback + claim id. A Porter envelope can carry the ledger forward so Model B opens an already-populated, cert-verified ledger and gates its first action with zero tool calls — the Porter handoff and the LedgerAgent gate composed.
+`absorb` calls `ledger_absorb`, `render` calls `ledger_render`, and `gate` calls
+`certify_gate_decision`. `Decision.allowed` describes the recorded verdict;
+`can_execute` checks whether its permission still applies.
+
+Handoff envelopes carry exact session and ledger certificate IDs. Opening checks
+the stored certificate/witness, session identity, state/key list, and full ledger
+snapshot before restoring anything. Modified or missing certificate bindings,
+including envelopes created before those bindings were introduced, are rejected;
+re-close the producer session to issue a bound envelope. `open_and_gate` returns
+`REVISE` without a gate certificate when either verification fails. Existing
+target ledgers with different values are preserved and rejected. The certificate
+authenticates the producing database's recorded snapshot; external data truth and
+the security of trusted policy/certificate authorship remain separate concerns.
 
 ---
 
@@ -147,13 +167,19 @@ if decision.verdict != "ALLOW":
 3. **B2 gate** → reproduce Figure 1: ledger says booking is 48h old ⇒ `cancel_reservation` → **BLOCK** with the 24-hour message; within 24h or insured ⇒ **ALLOW**; missing reservation ⇒ **REVISE**.
 4. **B3 cert** → `certify_gate` records the decision; `replay_gate` re-verifies it from the witness; `gate_drift` flips to TRUE after a new `absorb`.
 
-**Wiring (last).** Append to `SCHEMA_FILES` in `src/nerode/db.py`, after the Phase-4 block, in dependency order:
+**Wiring.** `SCHEMA_FILES` in `src/nerode/db.py` applies these after Phase 4:
 
 ```python
     "B0_ledger.sql",            # Phase 5a — schema-anchored ledger (Absorb/Render)
     "B1_policy.sql",            # Phase 5b — policy predicate registry (Π)
     "B2_gate.sql",              # Phase 5c — policy_gate (GateFilter: ALLOW/REVISE/BLOCK)
     "B3_gate_cert.sql",         # Phase 5d — proof-carrying decisions + replay + drift
+    "B4_carry.sql",             # Phase 5e — certificate-bound ledger handoff
+    "C0_verify.sql",            # Phase 6a — unified witness re-verification
 ```
 
-**Caveats.** (a) Starter SQL, written to repo conventions, not yet run against a live Postgres. (b) Predicates are bound-parameter SQL (`$1` ledger, `$2` args) — never interpolate arg values. (c) The gate governs only registered `gated_tool`s; everything else passes (reads must not be gated). (d) `replay_gate` re-checks against the *pinned* snapshot (deterministic, the cert sense); `gate_drift` checks the *live* ledger (the SEB sense) — they answer different questions and both are needed.
+**Caveats.** Predicates are trusted operator-authored SQL with ledger/argument
+values bound as `$1`/`$2`. Register every environment-changing tool; unregistered
+tools without rules are treated as reads. Historical replay and live execution
+validity answer different questions; use `can_execute` before dispatch. No default
+or canonical database is used by the regression tests.

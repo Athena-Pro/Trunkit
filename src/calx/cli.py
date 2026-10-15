@@ -678,6 +678,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--compose-only", action="store_true",
         help="only write the compose file; do not start containers or apply schemas",
     )
+    qs.add_argument(
+        "--nerode-dsn", default=None,
+        help="Nerode connection string (default: NERODE_DSN or the generated container)",
+    )
     qs.set_defaults(func=_cmd_quickstart)
 
     ini = sub.add_parser("init", help="apply core schema; optionally load local extensions")

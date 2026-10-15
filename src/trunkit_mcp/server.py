@@ -48,24 +48,22 @@ if _src and _src not in sys.path:
 # ── Import trunkit layers (soft-fail for optional DB layer) ─────────────────
 import calx.arith as _arith  # noqa: E402
 import calx.bound as _bound  # noqa: E402
+import calx.bundle as _bundle_mod  # noqa: E402
 import calx.congruence as _congruence  # noqa: E402
 import calx.holographic as _holographic  # noqa: E402
 import calx.morphism as _morphism  # noqa: E402
 import calx.recurrence as _recurrence  # noqa: E402
-from calx.kernel import verify_bundle as kernel_verify_bundle  # noqa: E402
 from calx.kernel import verify_witness  # noqa: E402
 from calx.ledger import verify_chain  # noqa: E402
 
 try:
     import psycopg as _psycopg  # noqa: E402, F401
 
-    import calx.bundle as _bundle_mod  # noqa: E402
     import calx.db as _db  # noqa: E402
     _HAS_DB = True
 except ImportError:
     _HAS_DB = False
     _db = None          # type: ignore[assignment]
-    _bundle_mod = None  # type: ignore[assignment]
 
 _ALLOW_WRITE = os.environ.get("TRUNKIT_ALLOW_WRITE", "0").strip() == "1"
 _DSN: str | None = os.environ.get("CALX_DSN")
@@ -142,7 +140,7 @@ def kernel_verify(witness_json: str) -> dict[str, Any]:
     ok, evidence = verify_witness(witness)
     return {
         "verdict": _ok_label(ok),
-        "schema": witness.get("schema"),
+        "schema": witness.get("schema") if isinstance(witness, dict) else None,
         "evidence": evidence,
     }
 
@@ -159,12 +157,15 @@ def ledger_chain(bundle_json: str) -> dict[str, Any]:
     content_ok, premises_ok, witness_ok, and recomputed vs stored hashes.
     """
     try:
-        bundle = json.loads(bundle_json)
-    except json.JSONDecodeError as exc:
+        bundle = _bundle_mod.validate_bundle(json.loads(bundle_json))
+    except ValueError as exc:
         return {"error": f"invalid JSON: {exc}"}
 
     results = verify_chain(bundle)
-    all_ok = all(r["content_ok"] and r.get("premises_ok", True) for r in results)
+    all_ok = bool(results) and all(
+        r["content_ok"] and r.get("premises_ok", True) and r.get("witness_ok") is not False
+        for r in results
+    )
     return {
         "chain_ok": all_ok,
         "claim_count": len(results),
@@ -174,12 +175,10 @@ def ledger_chain(bundle_json: str) -> dict[str, Any]:
 
 @mcp.tool()
 def bundle_verify(bundle_json: str, offline: bool = False) -> dict[str, Any]:
-    """Full bundle verification: kernel witnesses + hash chain + DB probes.
+    """Verify kernels, chain integrity, lifecycle, and derivation dependencies.
 
-    Combines three independent verification passes:
-      1. Kernel re-check     — dependency-free, always runs
-      2. Hash-chain check    — dependency-free, always runs
-      3. DB probe replay     — skipped when offline=True or DB unreachable
+    Uses the same consumer pipeline as the CLI and standalone verifier.
+    DB probe replay is skipped when offline=True or the DB is unreachable.
 
     ``bundle_json`` — full JSON string of an exported bundle.
     ``offline``     — if True, skip DB probe replay even if a DB is reachable.
@@ -191,24 +190,9 @@ def bundle_verify(bundle_json: str, offline: bool = False) -> dict[str, Any]:
 
     try:
         try:
-            data = json.loads(bundle_json)
-        except json.JSONDecodeError as exc:
-            return {"error": f"invalid JSON: {exc}"}
-
-        # load_bundle expects a path; write a temp file
-        import tempfile
-        with tempfile.NamedTemporaryFile(
-            suffix=".json", mode="w", encoding="utf-8", delete=False
-        ) as tf:
-            tf.write(bundle_json)
-            tmp_path = tf.name
-
-        try:
-            bundle_obj = _bundle_mod.load_bundle(tmp_path)
+            bundle_obj = _bundle_mod.validate_bundle(json.loads(bundle_json))
         except ValueError as exc:
-            return {"error": str(exc)}
-        finally:
-            pathlib.Path(tmp_path).unlink(missing_ok=True)
+            return {"error": f"invalid JSON: {exc}"}
 
         base_dir = pathlib.Path(".")
 
@@ -221,24 +205,24 @@ def bundle_verify(bundle_json: str, offline: bool = False) -> dict[str, Any]:
             except Exception:
                 probe_results = _bundle_mod.verify_bundle(bundle_obj, None, base_dir)
 
-        # Independent kernel and chain passes
-        kernel_results = kernel_verify_bundle(bundle_obj)
-        chain_results = verify_chain(bundle_obj)
-
         claims_out = []
-        for pr, kr, cr in zip(probe_results, kernel_results, chain_results, strict=True):
+        for pr in probe_results:
+            cr = pr.chain or {}
             claims_out.append({
                 "claim_id": pr.claim_id,
                 "statement": pr.statement,
                 "method": pr.method,
+                "verdict": pr.status.lower(),
+                "notes": pr.notes,
                 "probe_verdict": pr.status,
                 "probe_notes": pr.notes,
                 "kernel_verdict": (
-                    kr.get("independent_verdict") if kr.get("checkable")
+                    _ok_label(pr.kernel_ok) if pr.kernel_checked
                     else "not_checkable"
                 ),
-                "chain_content_ok": cr["content_ok"],
-                "chain_premises_ok": cr.get("premises_ok", True),
+                "chain_content_ok": cr.get("content_ok"),
+                "chain_premises_ok": cr.get("premises_ok"),
+                "claim_bound": pr.claim_bound,
                 "witness_ok": cr.get("witness_ok"),
             })
 
@@ -246,7 +230,7 @@ def bundle_verify(bundle_json: str, offline: bool = False) -> dict[str, Any]:
         return {
             "summary": f"{n_valid}/{len(probe_results)} valid",
             "all_valid": n_valid == len(probe_results),
-            "exported_at": data.get("exported_at"),
+            "exported_at": bundle_obj.get("exported_at"),
             "claims": claims_out,
         }
 

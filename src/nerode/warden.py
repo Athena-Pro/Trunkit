@@ -36,7 +36,7 @@ Usage
                                  "airline_cancelled": False, "insurance_covered": False},
                  schema_type="reservation")
         decision = w.gate("cancel_reservation", {"reservation_id": "UX789"})
-        if decision.verdict != "ALLOW":
+        if not w.can_execute(decision):
             ...  # surface decision.feedback to the model; do NOT call the tool
 """
 
@@ -171,32 +171,42 @@ class Warden:
     def gate(self, tool: str, args: dict | None = None) -> Decision:
         """Evaluate a proposed environment-changing call and record the decision.
 
-        Returns a Decision; call the tool only if ``decision.allowed``.
+        Returns the exact certified Decision. Check ``can_execute(decision)``
+        immediately before dispatch to reject ledger/policy drift and expiry.
         """
         conn = self._require()
         args = args or {}
-        verdict, feedback, witness = conn.execute(
-            "SELECT verdict, feedback, witness FROM nerode.policy_gate(%s, %s, %s::jsonb)",
-            (self.session_id, tool, json.dumps(args)),
-        ).fetchone()
-        claim_row = conn.execute(
-            "SELECT nerode.certify_gate(%s, %s, %s::jsonb)",
+        verdict, feedback, witness, claim_id = conn.execute(
+            "SELECT verdict, feedback, witness, claim_id "
+            "FROM nerode.certify_gate_decision(%s, %s, %s::jsonb)",
             (self.session_id, tool, json.dumps(args)),
         ).fetchone()
         conn.commit()
         return Decision(
             verdict=verdict,
             feedback=feedback,
-            claim_id=claim_row[0] if claim_row else None,
+            claim_id=claim_id,
             witness=witness,
         )
 
     def drifted(self, witness: dict) -> bool:
-        """True if the live ledger no longer matches the decision's snapshot."""
+        """True if the live ledger or policy differs from the decision's snapshot."""
         conn = self._require()
         row = conn.execute(
             "SELECT nerode.gate_drift(%s, %s::jsonb)",
             (self.session_id, json.dumps(witness)),
+        ).fetchone()
+        return bool(row[0]) if row else False
+
+    def can_execute(self, decision: Decision) -> bool:
+        """Re-check replay, ledger/policy drift and expiry immediately before dispatch.
+
+        ``Decision.allowed`` reports the recorded verdict. This check also
+        establishes whether that recorded permission still applies now.
+        """
+        row = self._require().execute(
+            "SELECT nerode.gate_current(%s, %s::jsonb)",
+            (self.session_id, json.dumps(decision.witness)),
         ).fetchone()
         return bool(row[0]) if row else False
 

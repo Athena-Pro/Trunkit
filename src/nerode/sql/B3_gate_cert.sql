@@ -28,23 +28,26 @@ ON CONFLICT (name) DO NOTHING;
 -- Internal: recompute the verdict for a tool over a GIVEN ledger+args snapshot
 -- (not the live session). Shared by replay_gate. Mirrors policy_gate's logic.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION nerode.gate_verdict_over(
-    p_tool TEXT, p_ledger JSONB, p_args JSONB)
+CREATE OR REPLACE FUNCTION nerode.gate_verdict_snapshot(
+    p_policy JSONB, p_ledger JSONB, p_args JSONB)
 RETURNS TEXT AS $$
 DECLARE
-    v_rule RECORD;
+    v_rule JSONB;
     v_ok   BOOLEAN;
     v_block BOOLEAN := FALSE;
     v_soft  BOOLEAN := FALSE;
 BEGIN
+    IF (p_policy->>'gated')::boolean
+       AND jsonb_array_length(p_policy->'rules') = 0 THEN
+        RETURN 'REVISE';
+    END IF;
     FOR v_rule IN
-        SELECT predicate_sql, effect FROM nerode.policy_rule
-        WHERE tool = p_tool AND enabled ORDER BY id
+        SELECT value FROM jsonb_array_elements(p_policy->'rules')
     LOOP
-        v_ok := nerode.eval_policy(v_rule.predicate_sql, p_ledger, p_args);
+        v_ok := nerode.eval_policy(v_rule->>'predicate_sql', p_ledger, p_args);
         IF v_ok IS TRUE THEN
             CONTINUE;
-        ELSIF v_ok IS FALSE AND v_rule.effect = 'block' THEN
+        ELSIF v_ok IS FALSE AND v_rule->>'effect' = 'block' THEN
             v_block := TRUE;
         ELSE
             v_soft := TRUE;
@@ -57,6 +60,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql STABLE;
 
+CREATE OR REPLACE FUNCTION nerode.gate_verdict_over(
+    p_tool TEXT, p_ledger JSONB, p_args JSONB)
+RETURNS TEXT LANGUAGE sql STABLE AS $$
+    SELECT nerode.gate_verdict_snapshot(nerode.policy_bundle(p_tool), p_ledger, p_args);
+$$;
+
 -- ---------------------------------------------------------------------------
 -- nerode.replay_gate(witness) → BOOLEAN
 --   Consumer re-verification: recompute the verdict from the PINNED ledger +
@@ -65,12 +74,28 @@ $$ LANGUAGE plpgsql STABLE;
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION nerode.replay_gate(p_witness JSONB)
 RETURNS BOOLEAN
-LANGUAGE sql STABLE AS $$
-    SELECT nerode.gate_verdict_over(
-               p_witness->>'tool',
-               COALESCE(p_witness->'ledger', '{}'::jsonb),
-               COALESCE(p_witness->'args',   '{}'::jsonb)
-           ) = (p_witness->>'verdict');
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    v_policy JSONB;
+BEGIN
+    -- Never execute predicate SQL supplied only by an untrusted witness. The
+    -- revision must have been pinned by the trusted certifying producer.
+    SELECT body INTO v_policy FROM nerode.policy_snapshot
+    WHERE policy_hash = p_witness->>'policy_hash';
+    IF NOT FOUND THEN
+        RETURN NULL;
+    END IF;
+    IF v_policy IS DISTINCT FROM p_witness->'policy_snapshot'
+       OR v_policy->>'tool' IS DISTINCT FROM p_witness->>'tool'
+       OR md5((p_witness->'ledger')::text) IS DISTINCT FROM p_witness->>'ledger_hash'
+       OR jsonb_typeof(p_witness->'ledger') IS DISTINCT FROM 'object'
+       OR jsonb_typeof(p_witness->'args') IS DISTINCT FROM 'object'
+       OR p_witness->>'verdict' IS NULL THEN
+        RETURN FALSE;
+    END IF;
+    RETURN nerode.gate_verdict_snapshot(
+        v_policy, p_witness->'ledger', p_witness->'args') = p_witness->>'verdict';
+END;
 $$;
 
 COMMENT ON FUNCTION nerode.replay_gate(JSONB) IS
@@ -85,20 +110,23 @@ COMMENT ON FUNCTION nerode.replay_gate(JSONB) IS
 CREATE OR REPLACE FUNCTION nerode.gate_drift(p_session_id TEXT, p_witness JSONB)
 RETURNS BOOLEAN
 LANGUAGE sql STABLE AS $$
-    SELECT nerode.ledger_hash(p_session_id) IS DISTINCT FROM (p_witness->>'ledger_hash');
+    SELECT p_session_id IS DISTINCT FROM p_witness->>'session_id'
+        OR nerode.ledger_hash(p_session_id) IS DISTINCT FROM p_witness->>'ledger_hash'
+        OR md5(nerode.policy_bundle(p_witness->>'tool')::text)
+           IS DISTINCT FROM p_witness->>'policy_hash';
 $$;
 
 COMMENT ON FUNCTION nerode.gate_drift(TEXT, JSONB) IS
-    'SEB live-state drift: TRUE if the live ledger no longer matches the snapshot '
-    'the decision was made on ⇒ re-gate before acting.';
+    'SEB live-state drift: TRUE if the live ledger or governing policy differs '
+    'from the decision snapshot ⇒ re-gate before acting.';
 
 -- ---------------------------------------------------------------------------
 -- nerode.certify_gate(session, tool, args) → BIGINT (cert claim id)
 --   Run the gate and record the decision as a proof-carrying claim.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION nerode.certify_gate(
+CREATE OR REPLACE FUNCTION nerode.certify_gate_decision(
     p_session_id TEXT, p_tool TEXT, p_args JSONB DEFAULT '{}')
-RETURNS BIGINT AS $$
+RETURNS TABLE (verdict TEXT, feedback TEXT, witness JSONB, claim_id BIGINT) AS $$
 DECLARE
     v_verdict  TEXT;
     v_feedback TEXT;
@@ -110,9 +138,13 @@ DECLARE
     v_seq      INTEGER;
     v_probe    TEXT;
 BEGIN
-    SELECT verdict, feedback, witness
+    SELECT g.verdict, g.feedback, g.witness
     INTO   v_verdict, v_feedback, v_witness
-    FROM   nerode.policy_gate(p_session_id, p_tool, p_args);
+    FROM   nerode.policy_gate(p_session_id, p_tool, p_args) g;
+
+    INSERT INTO nerode.policy_snapshot (policy_hash, body)
+    VALUES (v_witness->>'policy_hash', v_witness->'policy_snapshot')
+    ON CONFLICT DO NOTHING;
 
     v_status := CASE v_verdict
                     WHEN 'ALLOW'  THEN 'valid'
@@ -122,7 +154,8 @@ BEGIN
     -- Distinct decisions (different args/ledger) are distinct claims; identical
     -- re-gates re-attest (append a certificate seq), like close_session.
     v_statement := 'gate:' || p_session_id || ':' || p_tool || ':'
-                   || md5(COALESCE(p_args::text,'') || (v_witness->>'ledger_hash'));
+                   || md5(COALESCE(p_args::text,'') || (v_witness->>'ledger_hash')
+                          || (v_witness->>'policy_hash'));
 
     v_probe := format('SELECT nerode.replay_gate(%L::jsonb)', v_witness);
 
@@ -134,7 +167,8 @@ BEGIN
     ON CONFLICT (statement) DO UPDATE SET subject_ref = EXCLUDED.subject_ref, probe_sql = EXCLUDED.probe_sql
     RETURNING id INTO v_claim_id;
 
-    SELECT COALESCE(max(seq),0)+1 INTO v_seq FROM cert.certificate WHERE claim_id = v_claim_id;
+    SELECT COALESCE(max(ce.seq),0)+1 INTO v_seq
+    FROM cert.certificate ce WHERE ce.claim_id = v_claim_id;
 
     INSERT INTO cert.certificate (claim_id, seq, status, evidence, valid_under)
     VALUES (
@@ -143,16 +177,47 @@ BEGIN
                            'rules_evaluated', v_witness->'rules_evaluated'),
         jsonb_build_object('nerode_schema_version', 1,
                            'ledger_hash', v_witness->>'ledger_hash',
-                           'decided_at',  v_witness->>'decided_at'))
+                           'policy_hash', v_witness->>'policy_hash',
+                           'decided_at',  v_witness->>'decided_at',
+                           'valid_until', v_witness->>'valid_until'))
     RETURNING id INTO v_cert_id;
 
     INSERT INTO cert.witness (certificate_id, kind, body, schema_version)
     VALUES (v_cert_id, 'gate_decision', v_witness,
             jsonb_build_object('nerode_schema_version', 1));
 
-    RETURN v_claim_id;
+    RETURN QUERY SELECT v_verdict, v_feedback, v_witness, v_claim_id;
 END;
 $$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION nerode.certify_gate(
+    p_session_id TEXT, p_tool TEXT, p_args JSONB DEFAULT '{}')
+RETURNS BIGINT LANGUAGE sql AS $$
+    SELECT claim_id FROM nerode.certify_gate_decision(p_session_id, p_tool, p_args);
+$$;
+
+-- A historical replay and a permission to execute now answer different
+-- questions. Consumers must check this immediately before dispatching a call.
+CREATE OR REPLACE FUNCTION nerode.gate_current(p_session_id TEXT, p_witness JSONB)
+RETURNS BOOLEAN LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    RETURN COALESCE(
+        p_witness->>'verdict' = 'ALLOW'
+        AND EXISTS (
+            SELECT 1 FROM cert.witness w
+            JOIN cert.certificate ce ON ce.id = w.certificate_id
+            JOIN cert.claim c ON c.id = ce.claim_id
+            WHERE w.kind = 'gate_decision' AND w.body = p_witness
+              AND ce.status = 'valid' AND c.method = 'policy_gate'
+              AND c.subject_ref->>'session_id' = p_session_id)
+        AND nerode.replay_gate(p_witness)
+        AND NOT nerode.gate_drift(p_session_id, p_witness)
+        AND (p_witness->>'decided_at')::timestamptz <= statement_timestamp()
+        AND (p_witness->>'valid_until')::timestamptz > statement_timestamp(), FALSE);
+EXCEPTION WHEN OTHERS THEN
+    RETURN FALSE;
+END;
+$$;
 
 COMMENT ON FUNCTION nerode.certify_gate(TEXT, TEXT, JSONB) IS
     'Run the policy gate and record the decision as a proof-carrying cert claim '

@@ -196,6 +196,7 @@ BEGIN
 
     v_subject_ref := jsonb_build_object(
         'session_id', p_session_id,
+        'ledger_binding', p_detail->'ledger_binding',
         'dfa_states', jsonb_build_object(
                           'session_calx_loop', v_calx_state,
                           'session_edit_loop', v_edit_state
@@ -268,12 +269,17 @@ BEGIN
     --   dfa_states   — expected final states after replaying input_window
     --   cache_keys   — pre-built sequence_cache entries available this session
     v_witness_body := jsonb_build_object(
+        'session_id', p_session_id,
+        'ledger_binding', p_detail->'ledger_binding',
         'input_window', COALESCE(v_input_window, ''),
         'dfa_states',   jsonb_build_object(
                             'session_calx_loop', v_calx_state,
                             'session_edit_loop', v_edit_state
                         ),
-        'cache_keys',   v_cache_keys
+        'cache_keys',   v_cache_keys,
+        'attention_hint', COALESCE(
+            p_detail->>'attention_hint',
+            'session closed; DFA states and cache keys captured')
     );
 
     INSERT INTO cert.witness (certificate_id, kind, body, schema_version)
@@ -289,6 +295,8 @@ BEGIN
         'handoff_v',          1,
         'session_id',         p_session_id,
         'cert_bundle_id',     v_claim_id,
+        'cert_certificate_id', v_cert_id,
+        'ledger_binding', p_detail->'ledger_binding',
         'cache_keys',         v_cache_keys,
         'session_dfa_states', jsonb_build_object(
                                   'session_calx_loop', v_calx_state,

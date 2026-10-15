@@ -140,6 +140,87 @@ mcp_mod = pytest.importorskip("mcp", reason="mcp extra not installed")
 from trunkit_mcp import server  # noqa: E402
 
 
+def _portable_entry(claim_id=1, *, valid=True):
+    return {
+        "claim": {"id": claim_id, "statement": "12 factorization", "method": "cert_kernel"},
+        "certificate": {"seq": 1, "status": "valid"},
+        "witness": {"kind": "term", "body": {
+            "schema": "factorization", "n": 12,
+            "factors": [[2, 2 if valid else 1], [3, 1]],
+        }},
+    }
+
+
+def _portable_bundle(*entries, version=1):
+    return json.dumps({"trunk_bundle_version": version, "claims": list(entries)})
+
+
+def test_bundle_tool_aggregates_actual_kernel_failure():
+    out = server.bundle_verify(_portable_bundle(_portable_entry(valid=False)), offline=True)
+    assert out["all_valid"] is False
+    assert out["claims"][0]["verdict"] == "refuted"
+    assert out["claims"][0]["kernel_verdict"] == "refuted"
+
+
+def test_bundle_tool_never_promotes_an_uncheckable_attestation():
+    entry = _portable_entry()
+    entry["witness"]["body"] = {}
+    out = server.bundle_verify(_portable_bundle(entry), offline=True)
+    assert out["all_valid"] is False
+    assert out["claims"][0]["verdict"] == "unverified"
+
+
+def test_bundle_tool_honors_transitive_revocations_in_reverse_order():
+    leaf, middle, top = [_portable_entry(i) for i in (1, 2, 3)]
+    leaf["revocation"] = {"reason": "withdrawn"}
+    middle["derivation"] = {"premise_ids": [1]}
+    top["derivation"] = {"premise_ids": [2]}
+    out = server.bundle_verify(_portable_bundle(top, middle, leaf), offline=True)
+    assert out["all_valid"] is False
+    assert all(r["verdict"] == "unverified" for r in out["claims"])
+
+
+def test_bundle_tool_cannot_ignore_failed_chain_when_kernel_passes():
+    entry = _portable_entry()
+    entry["certificate"]["row_hash"] = "0" * 64
+    out = server.bundle_verify(_portable_bundle(entry, version=2), offline=True)
+    assert out["all_valid"] is False
+    assert out["claims"][0]["kernel_verdict"] == "valid"
+    assert out["claims"][0]["verdict"] == "refuted"
+    assert out["claims"][0]["chain_content_ok"] is False
+
+
+def test_ledger_chain_tool_includes_witness_integrity_in_aggregate():
+    from calx.ledger import certificate_row_hash
+
+    entry = _portable_entry()
+    entry["certificate"]["row_hash"] = certificate_row_hash(
+        1, 1, "valid", {}, {}, None, None, []
+    )
+    entry["witness"]["row_hash"] = "0" * 64
+    out = server.ledger_chain(_portable_bundle(entry, version=2))
+    assert out["claims"][0]["content_ok"] is True
+    assert out["claims"][0]["witness_ok"] is False
+    assert out["chain_ok"] is False
+
+
+def test_bundle_tool_runs_offline_without_optional_database_imports(monkeypatch):
+    monkeypatch.setattr(server, "_HAS_DB", False)
+    out = server.bundle_verify(_portable_bundle(_portable_entry()))
+    assert out["all_valid"] is True
+
+
+@pytest.mark.parametrize("payload", ["[]", "{}", '{"trunk_bundle_version": 1, "claims": []}'])
+def test_bundle_and_chain_tools_reject_malformed_or_empty_input(payload):
+    assert "error" in server.bundle_verify(payload, offline=True)
+    assert "error" in server.ledger_chain(payload)
+
+
+def test_kernel_tool_handles_nonobject_and_nontext_schema():
+    assert server.kernel_verify("[]")["verdict"] == "unverified"
+    assert server.kernel_verify('{"schema": []}')["verdict"] == "unverified"
+
+
 def test_tool_recurrence_verify_fibonacci():
     out = server.recurrence_verify("[[1],[-1],[-1]]", "[1,1]", "[1,1,2,3,5,8,13]")
     assert out["verdict"] == "valid" and out["verified_terms"] == 7

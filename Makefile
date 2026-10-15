@@ -28,23 +28,20 @@ apply-nerode:
 ## Apply all schemas for both databases
 apply: apply-trunkit apply-nerode
 
-## Trunkit smoke check: populate integers and run reflexive closure
+## Trunkit smoke check: exact arithmetic and installed certificate methods
 check-trunkit:
-	python tools/kan_in_kan.py
+	python -m calx.smoke --only trunkit --trunk-dsn "$(TRUNK_DSN)"
 
-## Nerode smoke check: build a minimal DFA from a*b+ and run it
+## Nerode smoke check: DFA execution and certificate-backed Porter handoff
 check-nerode:
-	nerode build --regex "a*b+" --dsn "$(NERODE_DSN)"
-	nerode run  --input "aaab"   --dsn "$(NERODE_DSN)" --id 1
+	python -m calx.smoke --only nerode --nerode-dsn "$(NERODE_DSN)"
 
 ## Run all checks
 check: check-trunkit check-nerode
 
 ## Full local bootstrap: up -> apply -> check
 install: up
-	@echo "Waiting for databases to be ready..."
-	@sleep 3
-	$(MAKE) apply
+	trunkit --dsn "$(TRUNK_DSN)" quickstart --nerode-dsn "$(NERODE_DSN)"
 	$(MAKE) check
 
 ## Install Python packages in editable/dev mode

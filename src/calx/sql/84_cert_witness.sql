@@ -36,6 +36,8 @@ BEGIN
             -- Nerode automata bridge
             'construction_record', 'computation_trace',
             'nerode_partition', 'bisimulation', 'state_map',
+            -- quantitative automata and Porter policy/carry certificates
+            'payoff_trace', 'monotonicity_probe', 'gate_decision', 'ledger_snapshot',
             -- topological bridge (nerode 98_topological_signature.sql)
             'betti'
         ));

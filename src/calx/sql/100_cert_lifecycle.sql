@@ -250,9 +250,23 @@ latest_witness AS (
      ORDER BY w.certificate_id, w.id DESC
 ),
 derivations AS (
-    SELECT d.conclusion_id, d.premise_ids, d.rule, d.asserted_at
+    -- Every recorded derivation contributes obligations (the same AND
+    -- semantics as derivation_valid_deep). Group before the outer join so a
+    -- conclusion with multiple derivations still exports exactly once.
+    SELECT d.conclusion_id,
+           ARRAY(SELECT DISTINCT p.premise_id
+                   FROM cert.derivation dx
+                   CROSS JOIN LATERAL unnest(dx.premise_ids) AS p(premise_id)
+                  WHERE dx.conclusion_id = d.conclusion_id
+                  ORDER BY p.premise_id) AS premise_ids,
+           CASE WHEN count(*) = 1 THEN min(d.rule) ELSE 'all_derivations' END AS rule,
+           min(d.asserted_at) AS asserted_at,
+           jsonb_agg(jsonb_build_object(
+               'id', d.id, 'premise_ids', to_jsonb(d.premise_ids),
+               'rule', d.rule, 'asserted_at', d.asserted_at) ORDER BY d.id) AS rules
       FROM cert.derivation d
      WHERE d.conclusion_id = ANY(p_claim_ids)
+     GROUP BY d.conclusion_id
 ),
 artifacts AS (
     SELECT a.claim_id, a.kind AS artifact_kind, a.path,
@@ -307,7 +321,9 @@ SELECT jsonb_build_object(
                            THEN jsonb_build_object(
                                     'premise_ids', to_jsonb(d.premise_ids),
                                     'rule',        d.rule,
-                                    'asserted_at', d.asserted_at
+                                    'asserted_at', d.asserted_at,
+                                    'combination', 'all',
+                                    'rules', d.rules
                                 )
                            ELSE NULL END,
             'artifact',    CASE WHEN a.claim_id IS NOT NULL
