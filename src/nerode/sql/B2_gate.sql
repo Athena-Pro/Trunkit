@@ -24,7 +24,8 @@ RETURNS TABLE (verdict TEXT, feedback TEXT, witness JSONB) AS $$
 DECLARE
     v_ledger    JSONB;
     v_gated     BOOLEAN;
-    v_rule      RECORD;
+    v_policy    JSONB;
+    v_rule      JSONB;
     v_ok        BOOLEAN;
     v_results   JSONB := '[]'::jsonb;
     v_msgs      TEXT[] := ARRAY[]::TEXT[];
@@ -35,33 +36,36 @@ DECLARE
     v_feedback  TEXT;
 BEGIN
     v_ledger := nerode.ledger_render(p_session_id);
-    SELECT EXISTS (SELECT 1 FROM nerode.gated_tool WHERE tool = p_tool) INTO v_gated;
+    v_policy := nerode.policy_bundle(p_tool);
+    v_gated := (v_policy->>'gated')::boolean;
 
     FOR v_rule IN
-        SELECT id, name, predicate_sql, message, effect
-        FROM nerode.policy_rule
-        WHERE tool = p_tool AND enabled
-        ORDER BY id
+        SELECT value FROM jsonb_array_elements(v_policy->'rules')
     LOOP
         v_n_rules := v_n_rules + 1;
-        v_ok := nerode.eval_policy(v_rule.predicate_sql, v_ledger, p_args);
+        v_ok := nerode.eval_policy(v_rule->>'predicate_sql', v_ledger, p_args);
 
         v_results := v_results || jsonb_build_object(
-            'rule', v_rule.name, 'effect', v_rule.effect,
+            'rule', v_rule->>'name', 'effect', v_rule->>'effect',
             'result', CASE WHEN v_ok IS NULL THEN 'indeterminate'
                            WHEN v_ok THEN 'permit' ELSE 'violate' END);
 
         IF v_ok IS TRUE THEN
             CONTINUE;                                  -- permitted by this rule
-        ELSIF v_ok IS FALSE AND v_rule.effect = 'block' THEN
+        ELSIF v_ok IS FALSE AND v_rule->>'effect' = 'block' THEN
             v_has_block := TRUE;
-            v_msgs := v_msgs || v_rule.message;
+            v_msgs := array_append(v_msgs, v_rule->>'message');
         ELSE
             -- FALSE+revise, or NULL (missing state) → soft
             v_has_soft := TRUE;
-            v_msgs := v_msgs || v_rule.message;
+            v_msgs := array_append(v_msgs, v_rule->>'message');
         END IF;
     END LOOP;
+
+    IF v_gated AND v_n_rules = 0 THEN
+        v_has_soft := TRUE;
+        v_msgs := array_append(v_msgs, 'no enabled governing policies for ' || p_tool);
+    END IF;
 
     -- ── resolve verdict ───────────────────────────────────────────────────
     IF v_has_block THEN
@@ -85,12 +89,15 @@ BEGIN
         'tool',        p_tool,
         'args',        p_args,
         'gated',       v_gated,
+        'policy_snapshot', v_policy,
+        'policy_hash', md5(v_policy::text),
         'verdict',     v_verdict,
         'rules_evaluated', v_n_rules,
         'rule_results',    v_results,
         'ledger',      v_ledger,
         'ledger_hash', md5(v_ledger::text),
-        'decided_at',  now()
+        'decided_at',  statement_timestamp(),
+        'valid_until', statement_timestamp() + interval '5 minutes'
     );
 END;
 $$ LANGUAGE plpgsql STABLE;

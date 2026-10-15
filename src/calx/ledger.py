@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from decimal import Decimal
 from typing import Any
 
 SEP = "\x1f"  # chr(31), the unit separator used in the SQL preimages
@@ -27,8 +28,69 @@ __all__ = [
     "certificate_row_hash",
     "witness_row_hash",
     "inference_row_hash",
+    "claim_digest",
+    "claim_binding_ok",
     "verify_chain",
 ]
+
+CLAIM_DIGEST_KIND = "trunkit-claim-v1"
+CLAIM_FIELDS = (
+    "id", "subject_kind", "subject_ref", "statement", "claim_kind",
+    "method", "probe_sql", "domain",
+)
+
+
+def _claim_canonical_json(value: Any) -> str:
+    """Canonical JSON for claim commitments; numeric scale is insignificant.
+
+    Kept separate from the historical certificate hash recipe so existing
+    ledger rows retain their original preimage. Mirrors claim_canonical_json
+    in migration 119, including fixed-decimal notation for JSON numbers.
+    """
+    if isinstance(value, (float, Decimal)):
+        number = Decimal(str(value))
+        if not number.is_finite():
+            raise ValueError("claim numbers must be finite")
+        if not number:
+            return "0"
+        rendered = format(number, "f")
+        return rendered.rstrip("0").rstrip(".") if "." in rendered else rendered
+    if isinstance(value, dict):
+        keys = sorted(value, key=lambda key: (len(key.encode("utf-8")), key.encode("utf-8")))
+        return "{" + ",".join(
+            json.dumps(key, ensure_ascii=False) + ":" + _claim_canonical_json(value[key])
+            for key in keys
+        ) + "}"
+    if isinstance(value, list):
+        return "[" + ",".join(_claim_canonical_json(item) for item in value) + "]"
+    return canonical_json(value)
+
+
+def claim_digest(claim: dict[str, Any]) -> str:
+    """Commit the semantic claim fields, excluding mutable display metadata."""
+    content = {key: claim.get(key) for key in CLAIM_FIELDS}
+    return hash_text(CLAIM_DIGEST_KIND + SEP + _claim_canonical_json(content))
+
+
+def claim_binding_ok(claim: dict[str, Any], certificate: dict[str, Any]) -> bool | None:
+    """Check an exact claim version; legacy certificates have no binding.
+
+    A digest proves a content relationship, not the identity of the producer.
+    Authentication still requires an independently trusted root/signature.
+    """
+    valid_under = certificate.get("valid_under") or {}
+    if not isinstance(valid_under, dict):
+        return False
+    digest = valid_under.get("claim_digest")
+    kind = valid_under.get("claim_digest_kind")
+    if digest is None and kind is None:
+        return None
+    if kind != CLAIM_DIGEST_KIND or not isinstance(digest, str):
+        return False
+    try:
+        return digest == claim_digest(claim)
+    except (TypeError, ValueError, AttributeError):
+        return False
 
 
 def canonical_json(o: Any) -> str:
@@ -136,7 +198,8 @@ def verify_chain(bundle: dict[str, Any]) -> list[dict[str, Any]]:
             cert.get("inference_hash"), cert.get("prev_hash"),
             cert.get("premise_hashes"),
         )
-        content_ok = stored is not None and recomputed == stored
+        claim_bound = claim_binding_ok(claim, cert)
+        content_ok = stored is not None and recomputed == stored and claim_bound is not False
 
         premises = cert.get("premise_hashes") or []
         bundled_premise_hashes = set(by_claim.values())
@@ -154,6 +217,7 @@ def verify_chain(bundle: dict[str, Any]) -> list[dict[str, Any]]:
             "claim_id": cid,
             "statement": claim.get("statement"),
             "content_ok": content_ok,
+            "claim_bound": claim_bound,
             "premises_ok": premises_ok,
             "witness_ok": witness_ok,
             "recomputed_row_hash": recomputed,

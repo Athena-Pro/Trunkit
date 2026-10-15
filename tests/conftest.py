@@ -35,8 +35,32 @@ src_dir_str = str(SRC_DIR)
 if src_dir_str not in sys.path:
     sys.path.insert(0, src_dir_str)
 
-from nerode.db import apply_schema as nerode_apply_schema
-from nerode.db import resolve_dsn as nerode_resolve_dsn
+from nerode.db import apply_schema as nerode_apply_schema  # noqa: E402
+
+
+def _database_unavailable(message: str) -> None:
+    """Integration CI must fail where a developer's database-free run skips."""
+    if os.environ.get("TRUNKIT_REQUIRE_TEST_DBS") == "1":
+        pytest.fail(message, pytrace=False)
+    pytest.skip(message)
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    if os.environ.get("TRUNKIT_REQUIRE_TEST_DBS") != "1":
+        return
+    for variable, alternative in (
+        ("CALX_TEST_DSN", "ARITHMETIC_DB_TEST_DSN"),
+        ("NERODE_TEST_DSN", None),
+    ):
+        dsn = os.environ.get(variable) or (os.environ.get(alternative) if alternative else None)
+        if not dsn:
+            raise pytest.UsageError(f"{variable} is required by TRUNKIT_REQUIRE_TEST_DBS=1")
+        try:
+            with psycopg.connect(dsn, connect_timeout=3):
+                pass
+        except psycopg.Error as exc:
+            # DSNs can contain credentials; report the variable, never its value.
+            raise pytest.UsageError(f"{variable} is not reachable") from exc
 
 # ---------------------------------------------------------------------------
 # Nerode fixtures
@@ -64,8 +88,8 @@ def nerode_dsn() -> str:
     connection, going nowhere.
     """
     if not NERODE_DSN:
-        pytest.skip("No NERODE_TEST_DSN provided. Refusing to use a "
-                    "default/production nerode instance.")
+        _database_unavailable("No NERODE_TEST_DSN provided. Refusing to use a "
+                              "default/production nerode instance.")
     return NERODE_DSN
 
 
@@ -78,21 +102,25 @@ def apply_schema_once() -> bool:
     on every subsequent test instead of retrying the connection themselves.
     """
     if not NERODE_DSN:
+        if os.environ.get("TRUNKIT_REQUIRE_TEST_DBS") == "1":
+            _database_unavailable("NERODE_TEST_DSN is required for integration tests")
         return False
     try:
         with psycopg.connect(NERODE_DSN, connect_timeout=3) as conn:
             nerode_apply_schema(conn)
-    except psycopg.Error:
+    except psycopg.Error as exc:
+        if os.environ.get("TRUNKIT_REQUIRE_TEST_DBS") == "1":
+            pytest.fail(f"Nerode test schema initialization failed: {exc}", pytrace=False)
         return False
     return True
 
 
 def _require_db(reachable: bool) -> psycopg.Connection:
     if not NERODE_DSN:
-        pytest.skip("No NERODE_TEST_DSN provided. Refusing to write to a "
-                    "default/production nerode instance.")
+        _database_unavailable("No NERODE_TEST_DSN provided. Refusing to write to a "
+                              "default/production nerode instance.")
     if not reachable:
-        pytest.skip("nerode DB not reachable")
+        _database_unavailable("nerode DB not reachable")
     return psycopg.connect(NERODE_DSN, autocommit=False, connect_timeout=3)
 
 
@@ -153,8 +181,8 @@ def calx_dsn() -> str:
     dsn = (os.environ.get("CALX_TEST_DSN")
            or os.environ.get("ARITHMETIC_DB_TEST_DSN"))
     if not dsn:
-        pytest.skip("No CALX_TEST_DSN provided. Refusing to apply schema or "
-                    "write to the default/production ledger.")
+        _database_unavailable("No CALX_TEST_DSN provided. Refusing to apply schema or "
+                              "write to the default/production ledger.")
     return dsn
 
 
@@ -165,7 +193,7 @@ def _initialized_calx_db(calx_dsn: str) -> str:
         with calx_db.connect(calx_dsn) as c:
             calx_db.apply_schema(c)
     except psycopg.Error as exc:
-        pytest.skip(f"calx DB not reachable: {exc}")
+        _database_unavailable(f"calx test schema initialization failed: {exc}")
     return calx_dsn
 
 

@@ -50,6 +50,42 @@ COMMENT ON TABLE nerode.policy_rule IS
 CREATE INDEX IF NOT EXISTS idx_policy_rule_tool
     ON nerode.policy_rule (tool) WHERE enabled;
 
+-- Gate witnesses refer to an immutable, content-addressed policy revision.
+-- Policy edits affect new decisions and execution drift, never historical replay.
+CREATE TABLE IF NOT EXISTS nerode.policy_snapshot (
+    policy_hash TEXT PRIMARY KEY,
+    body JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK (policy_hash = md5(body::text))
+);
+
+CREATE OR REPLACE FUNCTION nerode.reject_policy_snapshot_mutation()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'policy snapshots are append-only';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS policy_snapshot_immutable ON nerode.policy_snapshot;
+CREATE TRIGGER policy_snapshot_immutable
+BEFORE UPDATE OR DELETE OR TRUNCATE ON nerode.policy_snapshot
+FOR EACH STATEMENT EXECUTE FUNCTION nerode.reject_policy_snapshot_mutation();
+
+CREATE OR REPLACE FUNCTION nerode.policy_bundle(p_tool TEXT)
+RETURNS JSONB LANGUAGE sql STABLE AS $$
+    SELECT jsonb_build_object(
+        'policy_v', 1,
+        'tool', p_tool,
+        'gated', EXISTS (SELECT 1 FROM nerode.gated_tool WHERE tool = p_tool),
+        'rules', COALESCE((
+            SELECT jsonb_agg(jsonb_build_object(
+                'id', id, 'name', name, 'predicate_sql', predicate_sql,
+                'message', message, 'effect', effect) ORDER BY id)
+            FROM nerode.policy_rule WHERE tool = p_tool AND enabled
+        ), '[]'::jsonb)
+    );
+$$;
+
 -- ---------------------------------------------------------------------------
 -- Registration helpers (idempotent upserts).
 -- ---------------------------------------------------------------------------

@@ -16,3 +16,10 @@ build
 *.egg-info
 tests/fixtures/oeis/b*.txt
 .claude/
+**/.lake
+**/__pycache__
+local/
+scratch/
+graphify-out/
+.curry/
+proofs/fc_a080170/

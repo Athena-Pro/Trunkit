@@ -155,16 +155,24 @@ RETURNS JSONB AS $$
 DECLARE
     v_pack   JSONB;
     v_lclaim BIGINT;
+    v_lcert  BIGINT;
     v_env    JSONB;
 BEGIN
-    v_pack   := nerode.ledger_pack(p_session_id);
     v_lclaim := nerode.certify_ledger(p_session_id);
-    v_env    := nerode.close_session(p_session_id, p_detail);
+    SELECT w.body, ce.id INTO v_pack, v_lcert
+    FROM cert.certificate ce JOIN cert.witness w ON w.certificate_id = ce.id
+    WHERE ce.claim_id = v_lclaim AND w.kind = 'ledger_snapshot'
+    ORDER BY ce.seq DESC LIMIT 1;
+    v_env := nerode.close_session(p_session_id, p_detail || jsonb_build_object(
+        'ledger_binding', jsonb_build_object(
+            'claim_id', v_lclaim, 'certificate_id', v_lcert,
+            'ledger_hash', v_pack->>'ledger_hash')));
 
     RETURN v_env || jsonb_build_object(
         'ledger',          v_pack,
         'ledger_hash',     v_pack->>'ledger_hash',
-        'ledger_claim_id', v_lclaim
+        'ledger_claim_id', v_lclaim,
+        'ledger_certificate_id', v_lcert
     );
 END;
 $$ LANGUAGE plpgsql;
@@ -176,14 +184,67 @@ COMMENT ON FUNCTION nerode.close_with_ledger(TEXT, JSONB) IS
 -- ---------------------------------------------------------------------------
 -- nerode.open_with_ledger(envelope, new_session) → JSONB  context + restored ledger
 -- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION nerode.verify_carried_ledger(p_envelope JSONB)
+RETURNS BOOLEAN LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    IF p_envelope->'ledger'->>'ledger_v' IS DISTINCT FROM '1'
+       OR p_envelope->'ledger_binding' IS DISTINCT FROM jsonb_build_object(
+           'claim_id', p_envelope->'ledger_claim_id',
+           'certificate_id', p_envelope->'ledger_certificate_id',
+           'ledger_hash', p_envelope->'ledger_hash') THEN
+        RETURN FALSE;
+    END IF;
+    RETURN EXISTS (
+        SELECT 1 FROM cert.claim c
+        JOIN cert.certificate ce ON ce.claim_id = c.id
+        JOIN cert.witness w ON w.certificate_id = ce.id
+        WHERE c.id = (p_envelope->>'ledger_claim_id')::bigint
+          AND ce.id = (p_envelope->>'ledger_certificate_id')::bigint
+          AND c.subject_kind = 'nerode_ledger' AND c.method = 'ledger_snapshot'
+          AND c.subject_ref->>'session_id' = p_envelope->>'session_id'
+          AND ce.status = 'valid' AND w.kind = 'ledger_snapshot'
+          AND w.body = p_envelope->'ledger'
+          AND w.body->>'ledger_hash' = p_envelope->>'ledger_hash'
+          AND ce.valid_under->>'ledger_hash' = p_envelope->>'ledger_hash'
+          AND nerode.replay_ledger(w.body) IS TRUE
+    );
+EXCEPTION WHEN OTHERS THEN
+    RETURN FALSE;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION nerode.open_with_ledger(
     p_envelope JSONB, p_new_session_id TEXT)
 RETURNS JSONB AS $$
 DECLARE
     v_ctx       JSONB;
     v_restored  INTEGER := 0;
-    v_hash_ok   BOOLEAN := NULL;
+    v_hash_ok   BOOLEAN := FALSE;
+    v_existing  JSONB;
+    v_expected  JSONB;
 BEGIN
+    -- Validate against the stored certificate BEFORE writing any ledger or
+    -- session state. Rehashing values plus a caller-supplied hash proves only
+    -- self-consistency, not that this is the producer's certified snapshot.
+    IF p_new_session_id IS NULL OR nerode.verify_handoff(p_envelope) IS NOT TRUE
+       OR nerode.verify_carried_ledger(p_envelope) IS NOT TRUE THEN
+        RETURN jsonb_build_object(
+            'prior_session', jsonb_build_object('cert_valid', nerode.verify_handoff(p_envelope)),
+            'ledger', '{}'::jsonb, 'ledger_restored', 0, 'ledger_valid', FALSE,
+            'error', 'invalid or unbound handoff certificate');
+    END IF;
+
+    PERFORM pg_advisory_xact_lock(hashtextextended('nerode.ledger:' || p_new_session_id, 0));
+    v_existing := nerode.ledger_render(p_new_session_id);
+    SELECT COALESCE(jsonb_object_agg(e->>'path', e->'value'), '{}'::jsonb)
+    INTO v_expected FROM jsonb_array_elements(p_envelope->'ledger'->'entries') e;
+    IF v_existing <> '{}'::jsonb AND v_existing IS DISTINCT FROM v_expected THEN
+        RETURN jsonb_build_object(
+            'prior_session', jsonb_build_object('cert_valid', TRUE),
+            'ledger', '{}'::jsonb, 'ledger_restored', 0, 'ledger_valid', FALSE,
+            'error', 'target session already contains a different ledger');
+    END IF;
+
     v_ctx := nerode.open_session(p_envelope, p_new_session_id);
 
     IF p_envelope ? 'ledger' AND p_new_session_id IS NOT NULL THEN
@@ -222,9 +283,17 @@ DECLARE
 BEGIN
     v_ctx := nerode.open_with_ledger(p_envelope, p_new_session_id);
 
-    SELECT verdict, feedback, witness INTO v_verdict, v_feedback, v_witness
-    FROM nerode.policy_gate(p_new_session_id, p_tool, p_args);
-    v_claim := nerode.certify_gate(p_new_session_id, p_tool, p_args);
+    IF (v_ctx->>'ledger_valid')::boolean IS NOT TRUE
+       OR (v_ctx->'prior_session'->>'cert_valid')::boolean IS NOT TRUE THEN
+        RETURN jsonb_build_object(
+            'context', v_ctx,
+            'decision', jsonb_build_object(
+                'verdict', 'REVISE', 'feedback', 'handoff verification failed; refresh trusted context',
+                'claim_id', NULL, 'witness', '{}'::jsonb));
+    END IF;
+
+    SELECT verdict, feedback, witness, claim_id INTO v_verdict, v_feedback, v_witness, v_claim
+    FROM nerode.certify_gate_decision(p_new_session_id, p_tool, p_args);
 
     RETURN jsonb_build_object(
         'context',  v_ctx,

@@ -457,48 +457,47 @@ def verify_witness(witness: dict[str, Any] | None) -> tuple[bool | None, dict[st
     if not isinstance(witness, dict):
         return None, {"error": "witness is not an object"}
     schema = witness.get("schema")
-    if schema is None:
-        return None, {"error": "witness has no schema"}
+    if not isinstance(schema, str):
+        return None, {"error": "witness schema must be text"}
     checker = _KERNELS.get(schema)
     if checker is None:
         return None, {"error": f"no kernel for schema {schema!r}"}
-    return checker(witness)
+    try:
+        return checker(witness)
+    except (KeyError, ValueError, TypeError, IndexError, AttributeError, ArithmeticError) as exc:
+        # A recognised schema can still contain malformed nested JSON. Keep
+        # that input three-valued even when an individual checker misses it.
+        return None, {"error": f"{type(exc).__name__}: {exc}"}
 
 
 def verify_bundle(bundle: dict[str, Any]) -> list[dict[str, Any]]:
-    """Re-check every kernel-backed claim in an exported ``cert.export_bundle``.
+    """Compatibility view of the shared offline bundle verification pipeline.
 
-    Returns one result row per claim. Claims whose witness carries no recognised
-    kernel schema (e.g. comp_sql claims, which need the DB) are reported as
-    ``checkable=False`` rather than silently passed.
+    Bare ``claims`` dictionaries remain accepted by this older kernel API.
+    Lifecycle, integrity, and composition now constrain its verdicts just as
+    they do in the CLI and MCP consumer tools.
     """
+    from .bundle import validate_bundle
+    from .bundle import verify_bundle as verify_portable_bundle
+
+    portable = validate_bundle({"trunk_bundle_version": 1, **bundle})
     results: list[dict[str, Any]] = []
-    for entry in bundle.get("claims", []):
-        claim = entry.get("claim", {})
+    for entry, result in zip(portable.get("claims", []),
+                             verify_portable_bundle(portable), strict=True):
         wrap = entry.get("witness") or {}
         witness = wrap.get("body")
         ledger_status = (entry.get("certificate") or {}).get("status")
-
         schema = witness.get("schema") if isinstance(witness, dict) else None
-        if schema not in _KERNELS:
-            results.append({
-                "claim_id": claim.get("id"),
-                "statement": claim.get("statement"),
-                "checkable": False,
-                "ledger_status": ledger_status,
-                "note": "no kernel-checkable witness (needs the producer DB)",
-            })
-            continue
-
-        ok, evidence = verify_witness(witness)
-        independent = {True: "valid", False: "refuted", None: "unverified"}[ok]
+        checkable = isinstance(schema, str) and schema in _KERNELS
+        independent = result.status.lower()
         results.append({
-            "claim_id": claim.get("id"),
-            "statement": claim.get("statement"),
-            "checkable": True,
+            "claim_id": result.claim_id,
+            "statement": result.statement,
+            "checkable": checkable,
             "independent_verdict": independent,
             "ledger_status": ledger_status,
             "agrees_with_ledger": (independent == ledger_status),
-            "evidence": evidence,
+            "evidence": result.kernel_evidence,
+            "note": "; ".join(result.notes),
         })
     return results

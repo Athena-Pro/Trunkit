@@ -8,7 +8,9 @@ waits for readiness, applies both schemas, and prints next steps.
 
 from __future__ import annotations
 
+import os
 import pathlib
+import shlex
 import shutil
 import subprocess
 import time
@@ -62,6 +64,7 @@ volumes:
   nerode-pgdata:
 """
 
+TRUNK_DSN = "postgresql://trunk:trunk@localhost:5434/trunk"
 NERODE_DSN = "postgresql://nerode:nerode@localhost:5435/nerode"
 
 
@@ -92,7 +95,7 @@ def _compose_command() -> list[str] | None:
     return None
 
 
-def start_databases(compose_path: pathlib.Path) -> bool:
+def start_databases(compose_path: pathlib.Path, services: list[str]) -> bool:
     cmd = _compose_command()
     if cmd is None:
         print("error: docker (or docker-compose) not found on PATH")
@@ -100,7 +103,7 @@ def start_databases(compose_path: pathlib.Path) -> bool:
         print("  or point $CALX_DSN / $NERODE_DSN at existing PostgreSQL instances")
         return False
     result = subprocess.run(
-        [*cmd, "-f", str(compose_path), "up", "-d", "db-trunkit", "db-nerode"]
+        [*cmd, "-f", str(compose_path), "up", "-d", *services]
     )
     if result.returncode != 0:
         print("error: docker compose up failed (see output above)")
@@ -124,7 +127,7 @@ def wait_for(dsn: str, label: str, timeout: float = 90.0) -> bool:
     return False
 
 
-def apply_schemas(trunk_dsn: str | None, nerode_dsn: str) -> None:
+def apply_schemas(trunk_dsn: str, nerode_dsn: str) -> None:
     with calx_db.connect(trunk_dsn) as conn:
         calx_db.apply_unified(conn)
     print("  trunkit schema applied (calx/curry/kan/cert)")
@@ -143,22 +146,33 @@ def run(args) -> int:
     print(f"{verb} {compose_path}")
 
     if args.compose_only:
-        print("next: docker compose up -d, then `trunkit quickstart` again to apply schemas")
+        print(f"next: docker compose -f {shlex.quote(str(compose_path))} up -d")
+        print(f"then: trunkit quickstart --dir {shlex.quote(str(directory))}")
         return 0
 
-    if not start_databases(compose_path):
+    trunk_override = args.dsn or os.environ.get("CALX_DSN")
+    nerode_override = args.nerode_dsn or os.environ.get("NERODE_DSN")
+    # The generated containers have their own defaults. In particular, never
+    # inherit the native ledger's port from calx.db.DEFAULT_DSN here.
+    trunk_dsn = trunk_override or TRUNK_DSN
+    nerode_dsn = nerode_override or NERODE_DSN
+    services = []
+    if not trunk_override:
+        services.append("db-trunkit")
+    if not nerode_override:
+        services.append("db-nerode")
+    if services and not start_databases(compose_path, services):
         return 1
 
-    trunk_dsn = calx_db.resolve_dsn(args.dsn)
-    if not wait_for(trunk_dsn, "trunkit db (5434)") or not wait_for(
-        NERODE_DSN, "nerode db (5435)"
+    if not wait_for(trunk_dsn, "trunkit db") or not wait_for(
+        nerode_dsn, "nerode db"
     ):
         return 1
 
-    apply_schemas(args.dsn, NERODE_DSN)
+    apply_schemas(trunk_dsn, nerode_dsn)
 
     print("\nquickstart complete. Try:")
-    print("  trunkit generate --limit 100000 --backend pure")
-    print("  trunkit standing")
-    print('  nerode build --regex "(a|b)*abb" --write')
+    print(f"  trunkit --dsn {shlex.quote(trunk_dsn)} generate --limit 10000 --backend pure")
+    print(f"  trunkit --dsn {shlex.quote(trunk_dsn)} standing")
+    print(f'  nerode --dsn {shlex.quote(nerode_dsn)} build --regex "(a|b)*abb" --write')
     return 0

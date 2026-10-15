@@ -156,8 +156,14 @@ LANGUAGE sql AS $$
      ORDER BY c.id;
 $$;
 
--- Latest attestation per claim.
-CREATE OR REPLACE VIEW cert.standing AS
+-- Bootstrap the original column contract only on a fresh install. Step 100
+-- appends lifecycle columns; replaying this earlier definition must not try
+-- to remove those columns (or drop their dependent views/functions).
+DO $bootstrap_standing$
+BEGIN
+IF to_regclass('cert.standing') IS NULL THEN
+EXECUTE $view$
+CREATE VIEW cert.standing AS
 SELECT DISTINCT ON (cl.id)
        cl.id            AS claim_id,
        cl.statement,
@@ -170,7 +176,11 @@ SELECT DISTINCT ON (cl.id)
        ce.valid_under
   FROM cert.claim cl
   LEFT JOIN cert.certificate ce ON ce.claim_id = cl.id
- ORDER BY cl.id, ce.seq DESC NULLS LAST;
+ ORDER BY cl.id, ce.seq DESC NULLS LAST
+$view$;
+END IF;
+END
+$bootstrap_standing$;
 
 -- ---- Seed the four method tiers --------------------------------------------
 INSERT INTO cert.method (name, claim_kind, checker_kind, description) VALUES
