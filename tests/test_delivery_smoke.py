@@ -3,11 +3,11 @@
 from calx.smoke import check_nerode, check_trunkit
 
 
-def test_trunkit_public_smoke(calx_conn):
-    check_trunkit(calx_conn.info.dsn)
+def test_trunkit_public_smoke(calx_conn, calx_dsn):
+    check_trunkit(calx_dsn)
 
 
-def test_nerode_public_smoke(conn):
+def test_nerode_public_smoke(conn, nerode_dsn):
     counts_sql = (
         "SELECT (SELECT count(*) FROM cert.claim),"
         " (SELECT count(*) FROM cert.certificate),"
@@ -15,5 +15,5 @@ def test_nerode_public_smoke(conn):
         " (SELECT count(*) FROM nerode.automata)"
     )
     before = conn.execute(counts_sql).fetchone()
-    check_nerode(conn.info.dsn)
+    check_nerode(nerode_dsn)
     assert conn.execute(counts_sql).fetchone() == before
