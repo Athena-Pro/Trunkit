@@ -60,14 +60,28 @@ BEGIN
     -- ── Dispatch by witness kind ──────────────────────────────────────────
     BEGIN
         IF v_kind = 'payoff_trace' THEN
-            v_product := COALESCE(
-                NULLIF(v_witness->>'product_id','')::bigint,
-                (v_claim.subject_ref->>'automaton_id')::bigint);
+            v_product := (v_claim.subject_ref->>'automaton_id')::bigint;
+            IF v_product IS NULL OR (v_witness ? 'product_id' AND
+               (v_witness->>'product_id')::BIGINT IS DISTINCT FROM v_product) THEN
+                RETURN QUERY SELECT FALSE,jsonb_build_object('error','payoff product mismatch'),v_witness;
+                RETURN;
+            END IF;
+            IF v_claim.subject_ref->>'operation'='payoff_attainment' AND
+               (v_claim.subject_ref->'value' IS DISTINCT FROM v_witness->'value' OR
+                v_claim.subject_ref->'horizon' IS DISTINCT FROM v_witness->'horizon') THEN
+                RETURN QUERY SELECT FALSE,jsonb_build_object('error','payoff statement mismatch'),v_witness;
+                RETURN;
+            END IF;
             SELECT r.ok, r.recomputed INTO v_ok, v_rec
               FROM nerode.replay_payoff_trace(v_product, v_witness) r;
+            IF v_ok IS TRUE AND v_claim.subject_ref->>'operation' IS DISTINCT FROM 'payoff_attainment' THEN
+                v_ok := NULL; -- an attained value is not a verified extremum
+            END IF;
             v_ev := jsonb_build_object('kind','payoff_trace',
                        'product_id', v_product,
-                       'claimed', v_witness->'value', 'recomputed', v_rec);
+                       'claimed', v_witness->'value', 'recomputed', v_rec,
+                       'scope',COALESCE(v_witness->>'claim_scope','extremal'),
+                       'note','trace replay checks attainment; optimality requires a bound certificate');
 
         ELSIF v_kind = 'gate_decision' THEN
             v_ok := nerode.replay_gate(v_witness);

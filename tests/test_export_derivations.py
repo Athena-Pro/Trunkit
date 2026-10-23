@@ -9,6 +9,7 @@ import psycopg
 import pytest
 
 from calx.bundle import validate_bundle, verify_bundle
+from calx.proposition import witness_subject_ref
 
 
 @pytest.fixture
@@ -26,11 +27,13 @@ def export_conn(calx_dsn):
 
 
 def _claim(conn, *, history=False):
+    body = {"schema": "factorization", "n": 12, "factors": [[2, 2], [3, 1]]}
     claim = conn.execute(
         "INSERT INTO cert.claim "
         "(subject_kind, subject_ref, statement, claim_kind, method) "
-        "VALUES ('export_derivations_test', '{}'::jsonb, %s, 'computational', 'comp_sql') "
-        "RETURNING id", (f"export derivations {uuid.uuid4()}",),
+        "VALUES ('export_derivations_test', %s::jsonb, %s, 'computational', 'comp_sql') "
+        "RETURNING id",
+        (json.dumps(witness_subject_ref(body)), f"export derivations {uuid.uuid4()}"),
     ).fetchone()[0]
     if history:
         conn.execute(
@@ -43,8 +46,7 @@ def _claim(conn, *, history=False):
     ).fetchone()[0]
     conn.execute(
         "INSERT INTO cert.witness (certificate_id, kind, body) VALUES (%s, 'term', %s::jsonb)",
-        (certificate, json.dumps({"schema": "factorization", "n": 12,
-                                  "factors": [[2, 2], [3, 1]]})),
+        (certificate, json.dumps(body)),
     )
     return claim
 

@@ -17,7 +17,6 @@
 --                → the above, then policy_gate() on the first proposed action.
 --
 --  Depends on: B0/B1/B2/B3 + 93_handoff + 94_open_session + cert schema. Idempotent.
---  NOTE: starter file — not yet executed against a live database.
 -- =============================================================================
 
 INSERT INTO cert.method (name, claim_kind, checker_kind, description)
@@ -111,6 +110,9 @@ DECLARE
     v_seq      INTEGER;
     v_probe    TEXT;
 BEGIN
+    -- Use the same lock as ledger_absorb so the typed snapshot and its
+    -- certificate sequence are stable throughout this transaction.
+    PERFORM pg_advisory_xact_lock(hashtextextended('nerode.ledger:' || p_session_id, 0));
     v_pack := nerode.ledger_pack(p_session_id);
     v_hash := v_pack->>'ledger_hash';
     v_statement := 'ledger:' || p_session_id || ':' || v_hash;
@@ -221,7 +223,6 @@ DECLARE
     v_restored  INTEGER := 0;
     v_hash_ok   BOOLEAN := FALSE;
     v_existing  JSONB;
-    v_expected  JSONB;
 BEGIN
     -- Validate against the stored certificate BEFORE writing any ledger or
     -- session state. Rehashing values plus a caller-supplied hash proves only
@@ -235,10 +236,12 @@ BEGIN
     END IF;
 
     PERFORM pg_advisory_xact_lock(hashtextextended('nerode.ledger:' || p_new_session_id, 0));
-    v_existing := nerode.ledger_render(p_new_session_id);
-    SELECT COALESCE(jsonb_object_agg(e->>'path', e->'value'), '{}'::jsonb)
-    INTO v_expected FROM jsonb_array_elements(p_envelope->'ledger'->'entries') e;
-    IF v_existing <> '{}'::jsonb AND v_existing IS DISTINCT FROM v_expected THEN
+    v_existing := nerode.ledger_pack(p_new_session_id);
+    -- schema_type is part of the certified snapshot too. Comparing only the
+    -- rendered values would silently overwrite a target's incompatible type
+    -- or retain an uncertified type when the carried one is NULL.
+    IF v_existing->'entries' <> '[]'::jsonb
+       AND v_existing->'entries' IS DISTINCT FROM p_envelope->'ledger'->'entries' THEN
         RETURN jsonb_build_object(
             'prior_session', jsonb_build_object('cert_valid', TRUE),
             'ledger', '{}'::jsonb, 'ledger_restored', 0, 'ledger_valid', FALSE,

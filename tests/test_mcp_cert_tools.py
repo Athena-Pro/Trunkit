@@ -141,8 +141,12 @@ from trunkit_mcp import server  # noqa: E402
 
 
 def _portable_entry(claim_id=1, *, valid=True):
+    from calx.proposition import witness_subject_ref
+    body = {"schema": "factorization", "n": 12,
+            "factors": [[2, 2 if valid else 1], [3, 1]]}
     return {
-        "claim": {"id": claim_id, "statement": "12 factorization", "method": "cert_kernel"},
+        "claim": {"id": claim_id, "statement": "12 factorization", "method": "cert_kernel",
+                  "subject_ref": witness_subject_ref(body)},
         "certificate": {"seq": 1, "status": "valid"},
         "witness": {"kind": "term", "body": {
             "schema": "factorization", "n": 12,
@@ -303,14 +307,14 @@ def test_tool_bound_verify_optimality_is_three_valued():
     assert out["optimal"]["evidence"]["status"] == "best known on record"
 
 
-def test_tool_bound_verify_reaches_optimal_only_with_carried_standing():
+def test_tool_bound_verify_does_not_trust_carried_standing_as_an_optimum():
     attained = json.loads(_BOUNDS)
     attained[2] |= {"claim_id": 77, "attained_by": {"construction": "r+1"}}
     assert server.bound_verify(json.dumps(attained),
                                optimal_bound_id=3)["verdict"] == "unverified"
     attained[2] |= {"claim_standing": "valid"}
     assert server.bound_verify(json.dumps(attained),
-                               optimal_bound_id=3)["verdict"] == "valid"
+                               optimal_bound_id=3)["verdict"] == "unverified"
     attained[2] |= {"claim_standing": "revoked"}
     assert server.bound_verify(json.dumps(attained),
                                optimal_bound_id=3)["verdict"] == "unverified"
@@ -376,3 +380,20 @@ def test_python_claim_commitment_matches_sql(conn):
     for claim_id, stmt, method, status, evid_text, sql_root in rows:
         py_root = holographic.claim_commitment(claim_id, stmt, method, status, evid_text)
         assert py_root == sql_root, f"claim {claim_id}"
+
+
+
+def test_legacy_chain_without_hash_is_unverified_not_tampered():
+    out = server.ledger_chain(_portable_bundle(_portable_entry()))
+    assert out["verdict"] == "unverified"
+    assert out["chain_ok"] is None
+    assert out["claims"][0]["content_ok"] is None
+    assert "absent" in out["claims"][0]["reason"]
+
+
+def test_chain_mismatch_is_refuted_even_alongside_missing_evidence():
+    hashed, legacy = _portable_entry(1), _portable_entry(2)
+    hashed["certificate"]["row_hash"] = "0" * 64
+    out = server.ledger_chain(_portable_bundle(hashed, legacy))
+    assert out["verdict"] == "refuted"
+    assert out["chain_ok"] is False

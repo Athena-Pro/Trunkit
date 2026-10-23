@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import math
 
-import psycopg
 import pytest
 
 from nerode.db import apply_schema
@@ -28,8 +27,6 @@ from tests.dbskip import connect_or_skip
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
-
-DSN = "postgresql://nerode:nerode@localhost:5435/nerode"
 
 # Expected pairs: (lhs_slug, rhs_slug, lhs_states, rhs_states)
 _PAIRS = [
@@ -42,8 +39,8 @@ _PAIRS = [
 
 
 @pytest.fixture(scope="module")
-def conn():
-    c = connect_or_skip(DSN)
+def conn(nerode_dsn):
+    c = connect_or_skip(nerode_dsn)
     apply_schema(c)
     yield c
     c.rollback()
@@ -121,7 +118,7 @@ class TestProductPairsBuilt:
             "FROM nerode.product_pairs pp "
             "JOIN nerode.automata a ON a.id = pp.product_id"
         ).fetchall()
-        bad = [(l, r, t) for l, r, t in rows if t != "DFA"]
+        bad = [(left, right, t) for left, right, t in rows if t != "DFA"]
         assert bad == [], f"non-DFA product automata: {bad}"
 
     def test_all_actual_counts_positive(self, conn):
@@ -129,7 +126,7 @@ class TestProductPairsBuilt:
         rows = conn.execute(
             "SELECT lhs_slug, rhs_slug, actual_count FROM nerode.product_pairs"
         ).fetchall()
-        bad = [(l, r, ac) for l, r, ac in rows if ac is None or ac <= 0]
+        bad = [(left, right, ac) for left, right, ac in rows if ac is None or ac <= 0]
         assert bad == [], f"zero/null actual_count: {bad}"
 
     def test_build_product_corpus_idempotent(self, conn):
@@ -285,8 +282,8 @@ class TestProductDFALanguage:
             "JOIN nerode.automata a ON a.id = pp.product_id"
         ).fetchall()
         mismatches = [
-            (l, r, ac, sc)
-            for l, r, ac, sc in rows
+            (left, right, ac, sc)
+            for left, right, ac, sc in rows
             if ac != sc
         ]
         assert mismatches == [], (

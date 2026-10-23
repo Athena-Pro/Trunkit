@@ -123,7 +123,7 @@ def wait_for(dsn: str, label: str, timeout: float = 90.0) -> bool:
         except psycopg.OperationalError:
             time.sleep(2)
     print(" timed out")
-    print(f"error: {label} did not become ready within {timeout:.0f}s ({dsn})")
+    print(f"error: {label} did not become ready within {timeout:.0f}s")
     return False
 
 
@@ -140,6 +140,27 @@ def apply_schemas(trunk_dsn: str, nerode_dsn: str) -> None:
 
 
 def run(args) -> int:
+    no_docker = getattr(args, "no_docker", False)
+    trunk_override = args.dsn or os.environ.get("CALX_DSN")
+    nerode_override = args.nerode_dsn or os.environ.get("NERODE_DSN")
+    if no_docker:
+        if args.compose_only:
+            print("error: --no-docker and --compose-only cannot be combined")
+            return 2
+        if not trunk_override or not nerode_override:
+            print("error: --no-docker requires both CALX_DSN (or --dsn) and "
+                  "NERODE_DSN (or --nerode-dsn)")
+            return 2
+        if not wait_for(trunk_override, "trunkit db") or not wait_for(
+            nerode_override, "nerode db"
+        ):
+            return 1
+        apply_schemas(trunk_override, nerode_override)
+        print("quickstart complete using external PostgreSQL. Next:")
+        print("  trunkit generate --limit 10000 --backend pure "
+              "(with the same CALX_DSN or --dsn)")
+        return 0
+
     directory = pathlib.Path(args.dir).resolve()
     compose_path, created = ensure_compose_file(directory)
     verb = "wrote" if created else "found existing"

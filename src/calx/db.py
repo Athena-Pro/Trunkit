@@ -111,6 +111,13 @@ def connect(dsn: str | None = None, *, autocommit: bool = False) -> Iterator[Con
         resolve_dsn(dsn), autocommit=autocommit, connect_timeout=CONNECT_TIMEOUT
     )
     try:
+        # External databases need not use the historical `trunk` role. Set this
+        # on every connection rather than relying on cluster-wide role state.
+        # SET must not leave a transaction open: portable bundle replay
+        # requires an idle connection before entering its read-only sandbox.
+        conn.autocommit = True
+        conn.execute(f"SET search_path = {SEARCH_PATH}")
+        conn.autocommit = autocommit
         yield conn
         if not autocommit:
             conn.commit()
@@ -133,6 +140,9 @@ def apply_schema(conn: Connection, files: tuple[str, ...] = SCHEMA_FILES) -> Non
         for fname in files:
             path = SQL_DIR / fname
             cur.execute(path.read_text(encoding="utf-8"))
+        # generate re-applies the core routines; preserve their database-local
+        # paths for direct SQL consumers after that CREATE OR REPLACE pass.
+        cur.execute((SQL_DIR / "121_calx_routine_search_path.sql").read_text(encoding="utf-8"))
 
 
 def apply_extensions(conn: Connection, ext_dir: str | os.PathLike) -> list[str]:

@@ -17,6 +17,7 @@ Skips cleanly when no test DSN is set.
 
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from decimal import Decimal
@@ -255,6 +256,26 @@ def _bound(cur, quantity, direction, value, source="", claim_id=None) -> int:
     return cur.fetchone()[0]
 
 
+def _proof_for_bound(cur, bound):
+    """Simulate an external formal-checker result with a closure observation."""
+    cur.execute("SELECT comb.register_bound_claim(%s)", (bound,))
+    claim = cur.fetchone()[0]
+    declaration = f"test.bound_{claim}"
+    manifest = json.dumps({declaration: ["a" * 64, "b" * 64]})
+    cur.execute("SELECT cert.closure_manifest_digest(%s::jsonb)", (manifest,))
+    digest = cur.fetchone()[0]
+    cur.execute("SELECT cert.bind_statement_closure(%s,%s,'test fixture bound',"
+                " %s,%s::jsonb,'test')",
+                (claim, declaration, digest, manifest))
+    cur.execute("SELECT cert.observe_statement_closure(%s,%s,%s::jsonb,"
+                " 'test fixture bound',%s,'test')", (claim, digest, manifest, digest))
+    cur.execute("INSERT INTO cert.certificate(claim_id,seq,status,evidence)"
+                " SELECT %s,COALESCE(max(seq),0)+1,'valid',"
+                " '{\"external_checker\":\"test fixture\"}'::jsonb"
+                " FROM cert.certificate WHERE claim_id=%s", (claim, claim))
+    return claim
+
+
 def test_attaining_a_bound_points_it_at_the_object(conn, k23):
     with conn.cursor() as cur:
         q = _quantity(cur)
@@ -276,7 +297,7 @@ def test_attainment_resolves_to_a_deposited_object(conn, k23):
         q = _quantity(cur)
         b = _bound(cur, q, "lower", 6)
         cur.execute("SELECT comb.attain_bound(%s, %s)", (b, k23))
-        ok, ev = _probe(cur, "comb.bound_attainment(%s)", b)
+        ok, ev = _probe(cur, "comb.bound_resolution(%s)", b)
     assert ok is True
     assert ev["attaining_object"] == k23
     assert ev["witness"]["ground_n"] == 5
@@ -289,7 +310,7 @@ def test_a_dangling_witness_is_refuted(conn, k23):
         b = _bound(cur, q, "lower", 6)
         cur.execute("SELECT comb.attain_bound(%s, %s)", (b, k23))
         cur.execute("DELETE FROM comb.structure WHERE subject_id = %s", (k23,))
-        ok, ev = _probe(cur, "comb.bound_attainment(%s)", b)
+        ok, ev = _probe(cur, "comb.bound_resolution(%s)", b)
     assert ok is False
     assert ev["names"] == k23
 
@@ -298,7 +319,7 @@ def test_a_bound_naming_no_comb_object_is_not_this_layers_business(conn):
     with conn.cursor() as cur:
         q = _quantity(cur)
         b = _bound(cur, q, "lower", 6)
-        ok, ev = _probe(cur, "comb.bound_attainment(%s)", b)
+        ok, ev = _probe(cur, "comb.bound_resolution(%s)", b)
         assert ok is None
         assert ev["status"] == "nothing for this layer to check"
 
@@ -309,8 +330,8 @@ def test_a_bound_naming_no_comb_object_is_not_this_layers_business(conn):
 
 def test_an_unknown_bound_is_refused(conn):
     with conn.cursor() as cur:
-        ok, ev = _probe(cur, "comb.bound_attainment(%s)", -1)
-    assert ok is False
+        ok, ev = _probe(cur, "comb.bound_resolution(%s)", -1)
+    assert ok is None
     assert ev["reason"] == "no such bound"
 
 
@@ -318,7 +339,11 @@ def test_attesting_records_exactly_one_derivation_edge(conn, k23):
     with conn.cursor() as cur:
         q = _quantity(cur)
         b = _bound(cur, q, "lower", 6)
-        cur.execute("SELECT comb.attain_bound(%s, %s)", (b, k23))
+        cur.execute("SELECT comb.register_objective(%s,'edge_count','max',"
+                    " '{\"name\":\"triangle_free\"}'::jsonb,'graph',5)", (q,))
+        cur.execute("SELECT comb.bind_attainment(%s, %s)", (b, k23))
+        upper = _bound(cur, q, "upper", 6)
+        opposite = _proof_for_bound(cur, upper)
         cur.execute("SELECT comb.attest_attainment(%s)", (b,))
         optimal = cur.fetchone()[0]
         cur.execute("SELECT comb.attest_attainment(%s)", (b,))       # replay
@@ -330,7 +355,7 @@ def test_attesting_records_exactly_one_derivation_edge(conn, k23):
 
     with conn.cursor() as cur:
         cur.execute("SELECT comb.attainment_claim(%s)", (b,))
-        assert rows[0][0] == [cur.fetchone()[0]]
+        assert rows[0][0] == [cur.fetchone()[0], opposite]
 
 
 # --- Mantel at n = 5, end to end --------------------------------------------
@@ -345,23 +370,24 @@ def test_a_construction_and_a_theorem_close_an_extremal_value(conn, k23):
 
         q = _quantity(cur, "max edges in a triangle-free graph on 5 vertices")
         low = _bound(cur, q, "lower", 6, "K(2,3) construction", construction)
-        _bound(cur, q, "upper", 6, "Mantel 1907")
+        upper = _bound(cur, q, "upper", 6, "test verified upper bound")
 
         cur.execute("SELECT lower_value, upper_value, width FROM cert.enclosure(%s)",
                     (q,))
         assert cur.fetchone() == (Decimal(6), Decimal(6), Decimal(0))
 
-        cur.execute("SELECT comb.attain_bound(%s, %s)", (low, k23))
+        cur.execute("SELECT comb.register_objective(%s,'edge_count','max',"
+                    " '{\"name\":\"triangle_free\"}'::jsonb,'graph',5)", (q,))
+        _proof_for_bound(cur, upper)
+        cur.execute("SELECT comb.bind_attainment(%s, %s)", (low, k23))
         cur.execute("SELECT comb.attest_attainment(%s)", (low,))
         optimal = cur.fetchone()[0]
         assert _status(cur, optimal) == "valid"
 
 
 def test_breaking_the_construction_drops_optimality_but_not_resolution(conn, k23):
-    """Two claims, two verdicts. Adding an edge to K(2,3) makes a triangle, so
-    the construction is refuted and optimality falls back to unverified -- while
-    the attainment stays valid, because "the bound names an object that is
-    here" is a different statement from "that object has the property"."""
+    """Typed attainment detects a changed construction; pointer resolution
+    remains true because it asserts only that the object exists."""
     with conn.cursor() as cur:
         cur.execute("SELECT comb.construction_claim(%s, %s)", (k23, "triangle_free"))
         construction = cur.fetchone()[0]
@@ -369,7 +395,11 @@ def test_breaking_the_construction_drops_optimality_but_not_resolution(conn, k23
 
         q = _quantity(cur, "max edges in a triangle-free graph on 5 vertices")
         low = _bound(cur, q, "lower", 6, "K(2,3) construction", construction)
-        cur.execute("SELECT comb.attain_bound(%s, %s)", (low, k23))
+        cur.execute("SELECT comb.register_objective(%s,'edge_count','max',"
+                    " '{\"name\":\"triangle_free\"}'::jsonb,'graph',5)", (q,))
+        cur.execute("SELECT comb.bind_attainment(%s, %s)", (low, k23))
+        upper = _bound(cur, q, "upper", 6, "test verified upper bound")
+        _proof_for_bound(cur, upper)
         cur.execute("SELECT comb.attest_attainment(%s)", (low,))
         optimal = cur.fetchone()[0]
         assert _status(cur, optimal) == "valid"
@@ -379,7 +409,7 @@ def test_breaking_the_construction_drops_optimality_but_not_resolution(conn, k23
 
         cert_id = _check_with_witness(cur, construction)
         assert _cert_status(cur, cert_id) == "refuted"
-        assert _status(cur, optimal) == "unverified"
+        assert _status(cur, optimal) == "refuted"
 
-        cur.execute("SELECT comb.attainment_claim(%s)", (low,))
+        cur.execute("SELECT comb.resolution_claim(%s)", (low,))
         assert _status(cur, cur.fetchone()[0]) == "valid"

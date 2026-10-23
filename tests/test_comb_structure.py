@@ -188,9 +188,18 @@ def test_an_element_outside_the_ground_set_is_refused(conn, graph):
         cur.execute("SELECT comb.add_block(%s, ARRAY[0,9])", (graph,))
 
 
-def test_an_empty_block_is_refused(conn):
+def test_an_empty_set_member_is_preserved(conn):
     with conn.cursor() as cur:
         subject = _register(cur, "set_system", 3)
+        cur.execute("SELECT comb.add_block(%s, ARRAY[]::INTEGER[])", (subject,))
+        cur.execute("SELECT elements, size FROM comb.block_sets(%s)", (subject,))
+        assert cur.fetchone() == ([], 0)
+        assert _wellformed(cur, subject)[0] is True
+
+
+def test_an_empty_graph_block_is_refused(conn):
+    with conn.cursor() as cur:
+        subject = _register(cur, "graph", 3)
         with pytest.raises(psycopg.Error, match="at least one element"):
             cur.execute("SELECT comb.add_block(%s, ARRAY[]::INTEGER[])", (subject,))
 

@@ -128,8 +128,8 @@ BEGIN
         v_tid := comb.structure_id(p_target);
     END IF;
 
-    IF p_elements IS NULL OR cardinality(p_elements) = 0 THEN
-        RAISE EXCEPTION 'comb.register_witness: % assigns nothing', p_name;
+    IF p_elements IS NULL THEN
+        RAISE EXCEPTION 'comb.register_witness: % needs an explicit assignment array', p_name;
     END IF;
     IF cardinality(p_elements) <> cardinality(ARRAY(SELECT DISTINCT unnest(p_elements))) THEN
         RAISE EXCEPTION 'comb.register_witness: % assigns an element twice', p_name;
@@ -179,12 +179,15 @@ $$;
 CREATE OR REPLACE FUNCTION comb.block_sets(p_subject TEXT)
 RETURNS TABLE (block_idx INTEGER, elements INTEGER[], size INTEGER)
 LANGUAGE sql STABLE AS $$
-    SELECT i.block_idx,
-           array_agg(i.element_idx ORDER BY i.element_idx),
-           COUNT(*)::INTEGER
-      FROM comb.incidence i
-     WHERE i.structure_id = comb.structure_id(p_subject)
-     GROUP BY i.block_idx;
+    SELECT b.idx,
+           COALESCE(array_agg(i.element_idx ORDER BY i.element_idx)
+                    FILTER (WHERE i.element_idx IS NOT NULL), '{}'::INTEGER[]),
+           COUNT(i.element_idx)::INTEGER
+      FROM comb.block b
+      LEFT JOIN comb.incidence i
+        ON i.structure_id = b.structure_id AND i.block_idx = b.idx
+     WHERE b.structure_id = comb.structure_id(p_subject)
+     GROUP BY b.idx;
 $$;
 
 CREATE OR REPLACE FUNCTION comb.degree_sequence(p_subject TEXT)
@@ -208,6 +211,9 @@ RETURNS TABLE (ok BOOLEAN, evidence JSONB)
 LANGUAGE plpgsql STABLE AS $$
 DECLARE v_bad JSONB; v_n INTEGER;
 BEGIN
+    IF NOT (SELECT w.ok FROM comb.wellformed(p_subject) w) THEN
+        ok:=NULL; evidence:=jsonb_build_object('reason','structure is not well formed'); RETURN NEXT; RETURN;
+    END IF;
     SELECT COALESCE(jsonb_agg(jsonb_build_object(
                'block_idx', b.block_idx, 'size', b.size)), '[]'::jsonb), COUNT(*)
       INTO v_bad, v_n
@@ -241,6 +247,9 @@ RETURNS TABLE (ok BOOLEAN, evidence JSONB)
 LANGUAGE plpgsql STABLE AS $$
 DECLARE v_chains JSONB; v_n INTEGER; v_dups INTEGER;
 BEGIN
+    IF NOT (SELECT w.ok FROM comb.wellformed(p_subject) w) THEN
+        ok:=NULL; evidence:=jsonb_build_object('reason','structure is not well formed'); RETURN NEXT; RETURN;
+    END IF;
     SELECT COALESCE(jsonb_agg(jsonb_build_object(
                'contained_block', a.block_idx, 'contained', a.elements,
                'container_block', b.block_idx, 'container', b.elements)),
@@ -277,6 +286,12 @@ RETURNS TABLE (ok BOOLEAN, evidence JSONB)
 LANGUAGE plpgsql STABLE AS $$
 DECLARE v_bad JSONB; v_n INTEGER;
 BEGIN
+    IF NOT (SELECT w.ok FROM comb.wellformed(p_subject) w) THEN
+        ok:=NULL; evidence:=jsonb_build_object('reason','structure is not well formed'); RETURN NEXT; RETURN;
+    END IF;
+    IF EXISTS(SELECT 1 FROM comb.block_sets(p_subject) b WHERE b.size=0) THEN
+        ok:=false; evidence:=jsonb_build_object('reason','an empty member does not intersect itself'); RETURN NEXT; RETURN;
+    END IF;
     SELECT COALESCE(jsonb_agg(jsonb_build_object(
                'block_a', a.block_idx, 'elements_a', a.elements,
                'block_b', b.block_idx, 'elements_b', b.elements)), '[]'::jsonb),
@@ -323,6 +338,9 @@ BEGIN
             'reason', 'triangle-freeness is defined here for kind=graph',
             'structure', p_subject, 'kind', v_kind);
         RETURN NEXT; RETURN;
+    END IF;
+    IF NOT (SELECT w.ok FROM comb.wellformed(p_subject) w) THEN
+        ok:=NULL; evidence:=jsonb_build_object('reason','graph is not well formed'); RETURN NEXT; RETURN;
     END IF;
 
     -- comb.edge normalises to u < v, so a triangle a<b<c is exactly the
@@ -380,6 +398,16 @@ BEGIN
         ok := false;
         evidence := jsonb_build_object('reason', 'witness is not a colouring',
                                        'witness', p_name, 'kind', v_kind);
+        RETURN NEXT; RETURN;
+    END IF;
+    IF EXISTS (SELECT 1 FROM comb.witness_value v WHERE v.witness_id=v_wid
+        AND NOT EXISTS (SELECT 1 FROM comb.element e
+            WHERE e.structure_id=comb.structure_id(p_subject) AND e.idx=v.element_idx)) THEN
+        ok:=false; evidence:=jsonb_build_object('reason','assignment contains an element outside the ground set');
+        RETURN NEXT; RETURN;
+    END IF;
+    IF EXISTS (SELECT 1 FROM comb.block_sets(p_subject) b WHERE b.size=0) THEN
+        ok:=false; evidence:=jsonb_build_object('reason','empty block cannot receive a proper colouring');
         RETURN NEXT; RETURN;
     END IF;
 
@@ -444,8 +472,14 @@ BEGIN
                                        'witness', p_name, 'kind', v_kind);
         RETURN NEXT; RETURN;
     END IF;
+    IF EXISTS (SELECT 1 FROM comb.witness_value v WHERE v.witness_id=v_wid
+        AND NOT EXISTS (SELECT 1 FROM comb.element e
+            WHERE e.structure_id=comb.structure_id(p_subject) AND e.idx=v.element_idx)) THEN
+        ok:=false; evidence:=jsonb_build_object('reason','subset contains an element outside the ground set');
+        RETURN NEXT; RETURN;
+    END IF;
 
-    SELECT array_agg(element_idx ORDER BY element_idx) INTO v_set
+    SELECT COALESCE(array_agg(element_idx ORDER BY element_idx), '{}'::INTEGER[]) INTO v_set
       FROM comb.witness_value WHERE witness_id = v_wid;
 
     SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -511,6 +545,16 @@ BEGIN
 
     SELECT ground_n INTO s_n FROM comb.structure WHERE id = v_sid;
     SELECT ground_n INTO t_n FROM comb.structure WHERE id = v_tid;
+    IF (SELECT kind FROM comb.structure WHERE id=v_sid) <>
+       (SELECT kind FROM comb.structure WHERE id=v_tid) THEN
+        ok:=false; evidence:=jsonb_build_object('reason','source and target kinds differ');
+        RETURN NEXT; RETURN;
+    END IF;
+    IF EXISTS (SELECT 1 FROM comb.witness_value v WHERE v.witness_id=v_wid
+        AND NOT EXISTS(SELECT 1 FROM comb.element e WHERE e.structure_id=v_sid AND e.idx=v.element_idx)) THEN
+        ok:=false; evidence:=jsonb_build_object('reason','map domain is outside the source ground set');
+        RETURN NEXT; RETURN;
+    END IF;
     IF s_n <> t_n THEN
         ok := false;
         evidence := jsonb_build_object(

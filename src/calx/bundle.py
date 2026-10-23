@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from .kernel import verify_witness
 from .ledger import claim_binding_ok, verify_chain
+from .proposition import claim_witness_agreement
 
 if TYPE_CHECKING:
     from psycopg import Connection
@@ -228,11 +229,15 @@ def _own_verdict(
     if witness is not None:
         result.kernel_checked = True
         result.kernel_ok, result.kernel_evidence = verify_witness(witness.get("body"))
-        result.ok = result.kernel_ok
+        agreement, attribution = claim_witness_agreement(claim, witness.get("body"))
+        result.kernel_evidence.update(attribution)
+        result.ok = result.kernel_ok if agreement is True else None
         result.notes.append(
             "kernel witness re-checked" if result.kernel_ok is not None
             else f"witness unverified: {result.kernel_evidence.get('error', 'no checker verdict')}"
         )
+        if agreement is not True:
+            result.notes.append(attribution["error"])
 
     certificate = entry.get("certificate") or {}
     result.claim_bound = claim_binding_ok(claim, certificate)
@@ -315,8 +320,26 @@ def _apply_derivations(bundle: dict, results: list[ClaimResult]) -> None:
     parents: dict[int, set[int]] = {}
     consumers: dict[int, list[int]] = {cid: [] for cid in entries}
     pending = {}
+    hash_to_ids: dict[str, list[int]] = {}
+    for pid, parent_entry in entries.items():
+        row_hash = (parent_entry.get("certificate") or {}).get("row_hash")
+        if row_hash:
+            hash_to_ids.setdefault(row_hash, []).append(pid)
     for cid, entry in entries.items():
         premises = set((entry.get("derivation") or {}).get("premise_ids", []))
+        # Hash-committed premises remain dependencies when removable display
+        # metadata is absent. Match the precise certificate versions, too.
+        committed = (entry.get("certificate") or {}).get("premise_hashes") or []
+        unresolved = False
+        for row_hash in committed:
+            matches = hash_to_ids.get(row_hash, [])
+            if len(matches) != 1:
+                unresolved = True
+            else:
+                premises.add(matches[0])
+        if unresolved:
+            by_id[cid].ok = _combine(by_id[cid].ok, None)
+            by_id[cid].notes.append("committed premise version missing or ambiguous")
         parents[cid] = premises
         pending[cid] = len(premises & entries.keys())
         for pid in premises & entries.keys():

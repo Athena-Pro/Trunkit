@@ -60,7 +60,7 @@ BEGIN
         RETURN NEXT; RETURN;
     END IF;
     BEGIN
-        solution := crt(r.remainders, r.moduli);
+        solution := calx.crt(r.remainders, r.moduli);
     EXCEPTION WHEN OTHERS THEN
         ok := false;
         evidence := jsonb_build_object(

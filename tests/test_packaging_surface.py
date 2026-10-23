@@ -68,7 +68,9 @@ def test_wheel_shared_data_still_carries_the_tools_that_matter():
 def test_readme_install_surface_matches_single_distribution():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "pip install nerode" not in readme
-    assert "pip install trunkit   # installs both the trunkit and nerode CLIs" in readme
+    assert 'pip install ".[muse]"' in readme
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert {"trunkit", "nerode", "trunkit-mcp"} <= pyproject["project"]["scripts"].keys()
 
 
 def test_base_install_stays_pure_python_with_binary_as_a_real_extra():
@@ -87,15 +89,14 @@ def test_base_install_stays_pure_python_with_binary_as_a_real_extra():
     assert pyproject["project"]["dependencies"] == ["psycopg>=3.2,<4"]
     extras = pyproject["project"]["optional-dependencies"]
     assert "psycopg[binary]>=3.2,<4" in extras["binary"]
+    assert "psycopg[binary]>=3.2,<4" in extras["muse"]
 
 
 def test_mcp_extra_excludes_the_unsupported_major_version():
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     extras = pyproject["project"]["optional-dependencies"]
-    assert "mcp>=1.0.0,<2" in extras["mcp"]
-    assert "pydantic-settings>=2.5.2,<2.13" in extras["mcp"]
-    assert "mcp>=1.0.0,<2" in extras["dev"]
-    assert "pydantic-settings>=2.5.2,<2.13" in extras["dev"]
+    for extra in ("mcp", "muse", "dev"):
+        assert "mcp>=1.30,<2" in extras[extra]
 
 
 def test_ci_and_make_use_the_numeric_aware_schema_loader():

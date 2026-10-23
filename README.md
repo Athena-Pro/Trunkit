@@ -81,10 +81,24 @@ compromised or wiped Nerode cannot corrupt or rewrite proof history.
 
 ## Quick start
 
-From pip (requires Docker for the bundled databases):
+For Muse and other agent VMs without Docker or system libpq, use the
+[`muse` install and external PostgreSQL guide](docs/MUSE_SETUP.md):
 
 ```bash
-pip install trunkit   # installs both the trunkit and nerode CLIs
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install --upgrade "trunkit[muse]"  # includes MCP and bundled libpq
+# Set CALX_DSN and NERODE_DSN to separate PostgreSQL instances first.
+trunkit quickstart --no-docker
+trunkit generate --limit 10000 --backend pure
+```
+
+From this source checkout, use `python3 -m pip install ".[muse]"`.
+
+From pip with Docker for the bundled databases:
+
+```bash
+pip install "trunkit[binary]"  # includes libpq and both CLIs
 trunkit quickstart      # writes docker-compose.yml, starts both DBs, applies both schemas
 trunkit --dsn postgresql://trunk:trunk@localhost:5434/trunk generate --limit 10000 --backend pure
 trunkit --dsn postgresql://trunk:trunk@localhost:5434/trunk standing
@@ -101,8 +115,8 @@ pip install "trunkit[binary]"   # bundles libpq; no system PostgreSQL client nee
 ```
 
 Install `trunkit[mcp]` to add the optional `trunkit-mcp` server, or
-`trunkit[binary,mcp]` for both. CI smoke-tests the `[binary]` and
-`[binary,mcp]` wheel installs on Linux.
+`trunkit[binary,mcp]` for both. CI smoke-tests the `[binary]`, `[binary,mcp]`, and `[muse]` wheel installs
+on Linux, including real stdio calls from an externally managed Python VM.
 
 `trunkit quickstart --compose-only` just writes the compose file if you'd
 rather start the databases yourself. Existing instances are selected through
@@ -236,6 +250,18 @@ trunkit oeis-cosine --seq-id A000045    # scale-invariant growth-shape candidate
 
 ## Porter — model-to-model context handoff
 
+Porter carries verified handoffs: the next session receives the work and
+rechecks its certificate before acting. Long-term memory tools can supply a
+payload inside that handoff; Porter preserves the evidence for a particular
+session boundary.
+
+The [v2 protocol and MCP guide](docs/PORTER_PROTOCOL.md) adds immutable payload
+snapshots, per-key SHA-256 manifests, bounded read-only opens, optional atomic
+claim leases, and a carried-ledger first-action gate with prior-session health.
+`porter_open` is read-only; `porter_close`, `porter_claim`, `porter_release`, and
+`porter_open_and_gate` require `TRUNKIT_ALLOW_WRITE=1`. The original v1
+`Precacher` interface below remains available.
+
 Each model session starts with no memory of what the previous session fetched, proved,
 or decided. Porter pre-packs that context — external data, DFA states, proof certificates
 — into an envelope before the session closes. The next model calls
@@ -306,6 +332,38 @@ conn.execute(
 
 ## Attestable structures (calx / cert)
 
+### Finite combinatorial certificates
+
+`comb` stores graphs, hypergraphs, set systems, and exact point configurations.
+Portable `comb.v1` certificates now check immutable instances independently:
+colourings, independent sets, isomorphisms, cliques, odd cycles, matchings, covers,
+set-family properties, and exact chromatic/matching/cover optima. Checked
+relabeling and disjoint-union rules carry their premises and vertex maps.
+
+```bash
+trunkit comb demo --output c5.json
+trunkit verify --bundle c5.json --offline   # proves chi(C5) = 3
+trunkit comb import graph.json
+trunkit comb search graph.json --colours 3 --max-steps 100000
+trunkit dfa count dfa.json --length 30 --bundle --output counts.json
+```
+
+Claims identify the exact instance digest and typed predicate their witnesses
+prove. Legacy untyped witnesses remain unverified as evidence of arbitrary claim
+text. Best-known bound metadata alone does not establish mathematical optimality.
+Negative graph-colouring certificates use a checked, pinned RUP encoding;
+unsuccessful bounded search remains unknown. Exact Euclidean checks currently
+support rational and validated real quadratic coordinates.
+
+The DFA certificates count all accepted words by length, check recurrence
+identities against the transfer matrix, and certify finite-horizon integer-weighted
+optima with Bellman inequalities and attaining words. Synchronous products have
+explicit state and transition budgets.
+
+See [combinatorial workflows](docs/COMBINATORIAL_CERTIFICATES.md) and
+[automata certificates](docs/AUTOMATA_CERTIFICATES.md) for Python, SQL, CLI, and MCP
+interfaces and supported proof formats.
+
 Beyond integer-fact and categorical claims, cert ships re-checkable, **exact** certificate families:
 
 - **Recurrence certificates** — a C-finite/P-finite recurrence (coefficients + initial terms) regenerates a sequence; `cert.recurrence_*` verifies it exactly and refuses non-exact division.
@@ -321,7 +379,7 @@ Beyond integer-fact and categorical claims, cert ships re-checkable, **exact** c
 | Property | Mechanism |
 |----------|-----------|
 | Proof travels with code | `cert.witness` stores structured proof terms alongside every certificate |
-| Proofs compose | `cert.derivation` encodes a DAG of premises → conclusion under named rules |
+| Proofs compose | `cert.derivation` tracks premise dependencies; typed combinatorial kernels additionally check the construction rules and transported witnesses |
 | Consumer re-verifies | `cert.verify(claim_id)` replays without INSERTing — safe for untrusted callers |
 | Bundle is portable | `cert.export_bundle(ids[])` emits self-contained JSONB: claims + certs + witnesses + derivations |
 | Certificates have a lifecycle | `cert.revoke[_claim]` appends a revocation (never mutates); `SET trunkit.cert_ttl` stamps a validity window inside the hash-committed `valid_under`; `SET trunkit.signer` binds an identity. `cert.standing.effective_status` reads `revoked` / `expired`; revocation is loss of trust, **not** refutation |

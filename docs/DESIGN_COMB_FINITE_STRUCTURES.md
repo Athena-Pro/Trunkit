@@ -1,6 +1,6 @@
 # Design: `comb` — finite combinatorial structures and their property probes
 
-**Status:** design, not yet implemented.
+**Status:** implemented in SQL110–116; portable typed certificates, checked operations, and objective contracts added in SQL120 and `calx.combinatorial`. See `docs/COMBINATORIAL_CERTIFICATES.md` for current APIs and supported domains.
 **Implements:** gap **T2** of `docs/reports/Trunkit_Erdos_AI_Capability_Fit.md`
 (finite combinatorial-object store), the second item on that report's build
 queue and the largest remaining one.

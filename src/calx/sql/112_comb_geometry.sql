@@ -70,6 +70,11 @@ RETURNS comb.nf_elem
 LANGUAGE plpgsql IMMUTABLE AS $$
 DECLARE v_num NUMERIC[] := p_num; v_den NUMERIC := p_den; v_g NUMERIC; c NUMERIC;
 BEGIN
+    IF p_num IS NULL OR cardinality(p_num) = 0 OR p_den IS NULL
+       OR p_den <> trunc(p_den)
+       OR EXISTS (SELECT 1 FROM unnest(p_num) x WHERE x IS NULL OR x <> trunc(x)) THEN
+        RAISE EXCEPTION 'comb.nf_normalize: integer coefficients and denominator required';
+    END IF;
     IF v_den = 0 THEN
         RAISE EXCEPTION 'comb.nf_normalize: zero denominator';
     END IF;
@@ -135,6 +140,9 @@ LANGUAGE plpgsql IMMUTABLE AS $$
 DECLARE v_d INTEGER; v_num NUMERIC[] := '{}'; i INTEGER;
 BEGIN
     v_d := cardinality(p_min_poly) - 1;
+    IF cardinality(a.num) > v_d OR cardinality(b.num) > v_d THEN
+        RAISE EXCEPTION 'comb.nf_add: coefficient vector wider than field degree';
+    END IF;
     FOR i IN 1 .. v_d LOOP
         v_num[i] := COALESCE(a.num[i], 0) * b.den + COALESCE(b.num[i], 0) * a.den;
     END LOOP;
@@ -149,6 +157,9 @@ LANGUAGE plpgsql IMMUTABLE AS $$
 DECLARE v_d INTEGER; v_num NUMERIC[] := '{}'; i INTEGER;
 BEGIN
     v_d := cardinality(p_min_poly) - 1;
+    IF cardinality(a.num) > v_d OR cardinality(b.num) > v_d THEN
+        RAISE EXCEPTION 'comb.nf_sub: coefficient vector wider than field degree';
+    END IF;
     FOR i IN 1 .. v_d LOOP
         v_num[i] := COALESCE(a.num[i], 0) * b.den - COALESCE(b.num[i], 0) * a.den;
     END LOOP;
@@ -164,6 +175,9 @@ LANGUAGE plpgsql IMMUTABLE AS $$
 DECLARE v_d INTEGER; v_conv NUMERIC[] := '{}'; i INTEGER; j INTEGER; x NUMERIC;
 BEGIN
     v_d := cardinality(p_min_poly) - 1;
+    IF cardinality(a.num) > v_d OR cardinality(b.num) > v_d THEN
+        RAISE EXCEPTION 'comb.nf_mul: coefficient vector wider than field degree';
+    END IF;
     FOR i IN 1 .. 2 * v_d - 1 LOOP
         v_conv[i] := 0;
     END LOOP;
@@ -305,14 +319,21 @@ CREATE OR REPLACE FUNCTION comb.set_coordinate(
     p_num NUMERIC[], p_den NUMERIC DEFAULT 1
 ) RETURNS VOID
 LANGUAGE plpgsql AS $$
-DECLARE v_cid BIGINT; v_dim INTEGER; v_elem comb.nf_elem;
+DECLARE v_cid BIGINT; v_dim INTEGER; v_degree INTEGER; v_elem comb.nf_elem;
 BEGIN
     v_cid := comb.configuration_id(p_config);
     SELECT dim INTO v_dim FROM comb.configuration WHERE id = v_cid;
     IF p_axis < 0 OR p_axis >= v_dim THEN
         RAISE EXCEPTION 'comb.set_coordinate: axis % outside [0, %)', p_axis, v_dim;
     END IF;
+    v_degree := cardinality(comb.min_poly(p_config)) - 1;
+    IF cardinality(p_num) > v_degree THEN
+        RAISE EXCEPTION 'comb.set_coordinate: coefficient vector wider than field degree %', v_degree;
+    END IF;
     v_elem := comb.nf_normalize(p_num, p_den);
+    WHILE cardinality(v_elem.num) < v_degree LOOP
+        v_elem.num := array_append(v_elem.num, 0::NUMERIC);
+    END LOOP;
 
     INSERT INTO comb.point (configuration_id, idx) VALUES (v_cid, p_point)
     ON CONFLICT (configuration_id, idx) DO NOTHING;
@@ -424,6 +445,72 @@ $$;
 -- 4. Unit-distance realisation
 -- ---------------------------------------------------------------------------
 
+-- Integer Newton iteration avoids a floating-point root at the real-domain gate.
+CREATE OR REPLACE FUNCTION comb.integer_sqrt(p_n NUMERIC)
+RETURNS NUMERIC LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE x NUMERIC; y NUMERIC;
+BEGIN
+    IF p_n IS NULL OR p_n < 0 OR p_n <> trunc(p_n) THEN
+        RAISE EXCEPTION 'comb.integer_sqrt requires a nonnegative integer';
+    END IF;
+    IF p_n < 2 THEN RETURN p_n; END IF;
+    x := p_n; y := div(x + 1, 2);
+    WHILE y < x LOOP x := y; y := div(x + div(p_n, x), 2); END LOOP;
+    RETURN x;
+END $$;
+
+-- Initial certified real algebraic support: irreducible real quadratics.
+-- Either conjugate gives the same rational distance identities. Other exact
+-- quotient algebras remain storable, but are not certified Euclidean fields.
+CREATE OR REPLACE FUNCTION comb.real_field_supported(p_mp NUMERIC[])
+RETURNS BOOLEAN LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE d NUMERIC; r NUMERIC;
+BEGIN
+    IF cardinality(p_mp) <> 3 OR p_mp[3] IS DISTINCT FROM 1
+       OR EXISTS (SELECT 1 FROM unnest(p_mp) c WHERE c IS NULL OR c <> trunc(c)) THEN
+        RETURN false;
+    END IF;
+    d := p_mp[2] * p_mp[2] - 4 * p_mp[1];
+    IF d <= 0 THEN RETURN false; END IF;
+    r := comb.integer_sqrt(d);
+    RETURN r * r <> d;
+END $$;
+
+CREATE OR REPLACE FUNCTION comb.configuration_wellformed(p_config TEXT)
+RETURNS TABLE (ok BOOLEAN, evidence JSONB)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE c comb.configuration%ROWTYPE; v_degree INTEGER; v_bad INTEGER;
+BEGIN
+    SELECT * INTO c FROM comb.configuration WHERE subject_id = p_config;
+    IF c.id IS NULL THEN
+        ok := NULL; evidence := jsonb_build_object('reason','no such configuration');
+        RETURN NEXT; RETURN;
+    END IF;
+    v_degree := cardinality(comb.min_poly(p_config)) - 1;
+    SELECT count(*) INTO v_bad FROM comb.point p
+     WHERE p.configuration_id = c.id AND
+       (SELECT count(*) FROM comb.coordinate co
+         WHERE co.configuration_id = c.id AND co.point_idx = p.idx
+           AND co.axis >= 0 AND co.axis < c.dim) <> c.dim;
+    IF v_bad > 0 OR EXISTS (
+        SELECT 1 FROM comb.coordinate co WHERE co.configuration_id = c.id
+          AND (co.axis >= c.dim OR cardinality(co.num) < 1 OR cardinality(co.num) > v_degree
+               OR co.den <> trunc(co.den)
+               OR EXISTS (SELECT 1 FROM unnest(co.num) x WHERE x IS NULL OR x <> trunc(x)))) THEN
+        ok := false; evidence := jsonb_build_object('reason','malformed or incomplete coordinates');
+        RETURN NEXT; RETURN;
+    END IF;
+    IF c.coord_domain = 'float_heuristic' OR
+       (c.coord_domain = 'algebraic' AND NOT comb.real_field_supported(comb.min_poly(p_config))) THEN
+        ok := NULL; evidence := jsonb_build_object(
+            'reason','Euclidean geometry requires rational coordinates or a supported real quadratic field',
+            'coord_domain',c.coord_domain);
+        RETURN NEXT; RETURN;
+    END IF;
+    ok := true; evidence := jsonb_build_object('configuration',p_config,'real_domain_verified',true);
+    RETURN NEXT;
+END $$;
+
 CREATE OR REPLACE FUNCTION comb.points_are_distinct(p_config TEXT)
 RETURNS TABLE (ok BOOLEAN, evidence JSONB)
 LANGUAGE plpgsql STABLE AS $$
@@ -475,6 +562,7 @@ DECLARE
     v_bad_n  JSONB;
     v_ne     INTEGER;
     v_nn     INTEGER;
+    v_shape  RECORD;
 BEGIN
     v_cid := comb.configuration_id(p_config);
     SELECT s.id, s.kind, s.ground_n INTO v_sid, v_kind, v_n
@@ -493,6 +581,16 @@ BEGIN
         RETURN NEXT; RETURN;
     END IF;
 
+    SELECT * INTO v_shape FROM comb.wellformed(p_structure);
+    IF v_shape.ok IS DISTINCT FROM true THEN
+        ok := NULL; evidence := jsonb_build_object('reason','graph is not well formed','detail',v_shape.evidence);
+        RETURN NEXT; RETURN;
+    END IF;
+    SELECT * INTO v_shape FROM comb.configuration_wellformed(p_config);
+    IF v_shape.ok IS DISTINCT FROM true THEN
+        ok := v_shape.ok; evidence := v_shape.evidence; RETURN NEXT; RETURN;
+    END IF;
+
     SELECT COUNT(*) INTO v_pts FROM comb.point WHERE configuration_id = v_cid;
     IF v_pts <> v_n THEN
         ok := false;
@@ -500,6 +598,16 @@ BEGIN
             'reason', 'the configuration and the graph differ in size',
             'points', v_pts, 'vertices', v_n);
         RETURN NEXT; RETURN;
+    END IF;
+    IF EXISTS (SELECT 1 FROM comb.point p WHERE p.configuration_id = v_cid
+               AND NOT EXISTS (SELECT 1 FROM comb.element e
+                                WHERE e.structure_id = v_sid AND e.idx = p.idx)) THEN
+        ok := false; evidence := jsonb_build_object('reason','point indices do not match graph vertices');
+        RETURN NEXT; RETURN;
+    END IF;
+    SELECT * INTO v_shape FROM comb.points_are_distinct(p_config);
+    IF v_shape.ok IS DISTINCT FROM true THEN
+        ok := v_shape.ok; evidence := v_shape.evidence; RETURN NEXT; RETURN;
     END IF;
 
     -- Edges that are not at squared distance 1.

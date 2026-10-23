@@ -1,0 +1,78 @@
+name: Muse installed-wheel compatibility
+
+on:
+  workflow_call:
+
+jobs:
+  muse:
+    runs-on: ubuntu-24.04
+    # Ubuntu's Python is externally managed (PEP 668), just like the report's
+    # agent VM. The tool environment itself has neither Docker nor system libpq.
+    container: ubuntu:24.04
+    services:
+      ledger-postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: trunk
+          POSTGRES_PASSWORD: trunk
+          POSTGRES_DB: trunk
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      workspace-postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: nerode
+          POSTGRES_PASSWORD: nerode
+          POSTGRES_DB: nerode
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CALX_DSN: postgresql://trunk:trunk@ledger-postgres:5432/trunk
+      NERODE_DSN: postgresql://nerode:nerode@workspace-postgres:5432/nerode
+      PYTHONWARNINGS: error
+    steps:
+      - name: Install interpreter and build prerequisites
+        run: |
+          apt-get update
+          apt-get install --yes --no-install-recommends python3 python3-venv ca-certificates git
+          python3 -c "import ctypes.util, pathlib, shutil, sysconfig; assert pathlib.Path(sysconfig.get_path('stdlib'), 'EXTERNALLY-MANAGED').is_file(); assert ctypes.util.find_library('pq') is None; assert shutil.which('docker') is None"
+      - uses: actions/checkout@v4
+      - name: Build wheel in a separate build environment
+        run: |
+          python3 -m venv /tmp/trunkit-build
+          /tmp/trunkit-build/bin/python -m pip install build
+          /tmp/trunkit-build/bin/python -m build --wheel --outdir /tmp/trunkit-dist
+      - name: Install only the wheel's declared Muse dependencies into a fresh venv
+        run: |
+          python3 -m venv /tmp/trunkit-muse
+          wheel=$(find /tmp/trunkit-dist -maxdepth 1 -name "trunkit-*.whl" -print -quit)
+          test -n "$wheel"
+          /tmp/trunkit-muse/bin/python -m pip install "${wheel}[muse]"
+          /tmp/trunkit-muse/bin/python -m pip check
+      - name: Run real stdio checks without a database connection
+        run: |
+          cd /tmp
+          env -u CALX_DSN -u NERODE_DSN /tmp/trunkit-muse/bin/python "$GITHUB_WORKSPACE/tools/smoke_muse.py"
+      - name: Initialize externally supplied PostgreSQL without Docker
+        run: |
+          cd /tmp
+          /tmp/trunkit-muse/bin/trunkit quickstart --no-docker
+          /tmp/trunkit-muse/bin/trunkit generate --limit 10000 --backend pure
+          /tmp/trunkit-muse/bin/trunkit check 2 --write
+          /tmp/trunkit-muse/bin/python -m calx.smoke
+      - name: Verify installed-wheel MCP database acceptance cases
+        run: |
+          cd /tmp
+          /tmp/trunkit-muse/bin/python "$GITHUB_WORKSPACE/tools/smoke_muse.py" --database
+      - name: Demonstrate installed-wheel Porter v2 over stdio
+        env:
+          TRUNKIT_ALLOW_WRITE: "1"
+        run: |
+          cd /tmp
+          /tmp/trunkit-muse/bin/python "$GITHUB_WORKSPACE/tools/demo_porter_mcp.py" --write
