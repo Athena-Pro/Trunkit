@@ -35,7 +35,6 @@ jobs:
     env:
       CALX_DSN: postgresql://trunk:trunk@ledger-postgres:5432/trunk
       NERODE_DSN: postgresql://nerode:nerode@workspace-postgres:5432/nerode
-      PYTHONWARNINGS: error
     steps:
       - name: Install interpreter and build prerequisites
         run: |
@@ -56,10 +55,14 @@ jobs:
           /tmp/trunkit-muse/bin/python -m pip install "${wheel}[muse]"
           /tmp/trunkit-muse/bin/python -m pip check
       - name: Run real stdio checks without a database connection
+        env:
+          PYTHONWARNINGS: error
         run: |
           cd /tmp
           env -u CALX_DSN -u NERODE_DSN /tmp/trunkit-muse/bin/python "$GITHUB_WORKSPACE/tools/smoke_muse.py"
       - name: Initialize externally supplied PostgreSQL without Docker
+        env:
+          PYTHONWARNINGS: error
         run: |
           cd /tmp
           /tmp/trunkit-muse/bin/trunkit quickstart --no-docker
@@ -67,11 +70,14 @@ jobs:
           /tmp/trunkit-muse/bin/trunkit check 2 --write
           /tmp/trunkit-muse/bin/python -m calx.smoke
       - name: Verify installed-wheel MCP database acceptance cases
+        env:
+          PYTHONWARNINGS: error
         run: |
           cd /tmp
           /tmp/trunkit-muse/bin/python "$GITHUB_WORKSPACE/tools/smoke_muse.py" --database
       - name: Demonstrate installed-wheel Porter v2 over stdio
         env:
+          PYTHONWARNINGS: error
           TRUNKIT_ALLOW_WRITE: "1"
         run: |
           cd /tmp
