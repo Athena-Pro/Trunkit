@@ -355,13 +355,13 @@ def test_attained_but_uncertified_is_still_unverified(conn, quantity):
     assert "truth is not certified" in ev["reason"]
 
 
-def test_optimal_when_undominated_attained_and_its_truth_stands(conn, quantity):
+def test_legacy_optimality_metadata_is_unknown_even_when_truth_stands(conn, quantity):
     with conn.cursor() as cur:
         truth = _standing_claim(cur)
         best = _bound(cur, quantity, "upper", 3, claim_id=truth,
                       attained_by={"construction": "r+1"})
         ok, ev = _optimal(cur, best)
-    assert ok is True
+    assert ok is None
     assert ev["truth_claim_status"] == "valid"
 
 
@@ -371,7 +371,7 @@ def test_revoking_the_truth_claim_pulls_optimality_back_to_unverified(conn, quan
         truth = _standing_claim(cur)
         best = _bound(cur, quantity, "upper", 3, claim_id=truth,
                       attained_by={"construction": "r+1"})
-        assert _optimal(cur, best)[0] is True
+        assert _optimal(cur, best)[0] is None
         cur.execute("SELECT (cert.revoke_claim(%s, %s)).id", (truth, "test revocation"))
         ok, ev = _optimal(cur, best)
     assert ok is None
@@ -581,10 +581,10 @@ def test_mirror_will_not_call_a_bound_optimal_without_carried_standing():
     assert ev["truth_claim_status"] == "uncarried"
 
 
-def test_mirror_calls_a_bound_optimal_once_standing_is_carried():
+def test_mirror_will_not_promote_carried_standing_to_mathematical_optimality():
     best = _py(1, "upper", 3, claim_id=7, attained_by={"construction": "r+1"},
                claim_standing="valid")
-    assert boundlib.optimal(1, [best])[0] is True
+    assert boundlib.optimal(1, [best])[0] is None
 
 
 def test_mirror_declines_a_revoked_truth_claim():

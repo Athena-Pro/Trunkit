@@ -22,11 +22,11 @@ random legal moves (full BFS there is 16!/2 ≈ 10¹³, so the invariant is the 
 | Verdict | When | Certificate |
 |---------|------|-------------|
 | `valid` | a move-sequence witness is supplied and the kernel re-plays it to the goal | the replayed moves |
-| `refuted` | I = −1 (no witness can exist) **or** a supplied witness misses the goal | the parity number, or the failed replay |
-| `unverified` | I = +1 (solvable) but no witness attached yet | — |
+| `refuted` | I = −1 (no witness can exist) | the parity number |
+| `unverified` | I = +1 with no valid path attached, including a rejected supplied path | — |
 
 Demonstrated: solvable scramble → `unverified` with no witness, `valid` once the 14-move
-solution `UULDDRULLURDDR` is attached; the same instance with a truncated witness → `refuted`;
+solution `UULDDRULLURDDR` is attached; the same instance with a truncated witness → `unverified`;
 two swapped tiles → `refuted` purely from I = −1.
 
 ## Mapping to Trunkit

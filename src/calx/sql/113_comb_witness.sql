@@ -99,15 +99,15 @@ BEGIN
         'subject_id', c.subject_id,
         'dim', c.dim,
         'coord_domain', c.coord_domain,
-        'min_poly', to_jsonb(comb.min_poly(p_subject)),
+        'min_poly', to_jsonb(ARRAY(SELECT trim_scale(x) FROM unnest(comb.min_poly(p_subject)) x)),
         'field', (SELECT name FROM comb.number_field WHERE id = c.field_id),
         'points', COALESCE((
             SELECT jsonb_agg(jsonb_build_object(
                        'idx', p.idx,
                        'coords', (SELECT jsonb_agg(jsonb_build_object(
                                              'axis', co.axis,
-                                             'num', to_jsonb(co.num),
-                                             'den', co.den)
+                                             'num', to_jsonb(ARRAY(SELECT trim_scale(x) FROM unnest(co.num) x)),
+                                             'den', trim_scale(co.den))
                                          ORDER BY co.axis)
                                     FROM comb.coordinate co
                                    WHERE co.configuration_id = c.id

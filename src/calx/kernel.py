@@ -21,6 +21,9 @@ from fractions import Fraction
 from math import gcd, isqrt
 from typing import Any
 
+from .automata_count import check_automata_count, check_automata_extremal
+from .combinatorial import check_combinatorial
+
 __all__ = [
     "check_factorization",
     "check_crt",
@@ -49,23 +52,48 @@ def check_factorization(w: dict[str, Any]) -> tuple[bool | None, dict[str, Any]]
     """
     try:
         factors = w["factors"]
-        n = int(w["n"])
-        if not isinstance(factors, list) or not factors:
+        n = w["n"]
+        if type(n) is not int or n < 1 or n.bit_length() > 16384:
+            return None, {"error": "n must be a positive integer"}
+        if not isinstance(factors, list) or not factors or len(factors) > 4096:
             return None, {"error": "empty/!array factors"}
 
         prod, sigma, all_prime = 1, 1, True
-        for p, e in ((int(p), int(e)) for p, e in factors):
-            if p < 2 or e < 1 or not _is_prime(p):
+        seen = set()
+        primality_work = 0
+        for factor in factors:
+            if not isinstance(factor, list) or len(factor) != 2:
+                return None, {"error": "factors must be [prime, exponent] pairs"}
+            p, e = factor
+            if type(p) is not int or type(e) is not int:
+                return None, {"error": "prime bases and exponents must be integers"}
+            if p in seen:
+                return False, {"error": "prime bases must be distinct", "repeated_prime": p}
+            seen.add(p)
+            if p < 2 or e < 1:
+                return False, {"error": "prime bases and exponents must be positive"}
+            if p > n or e > n.bit_length() or (p.bit_length() - 1) * e >= n.bit_length():
+                return False, {"error": "factor power exceeds the asserted product"}
+            primality_work += isqrt(p) // 2 if p % 2 else 1
+            if primality_work > 2_000_000:
+                return None, {"error": "factorization exceeds primality verification budget"}
+            if not _is_prime(p):
                 all_prime = False
             prod *= p**e
+            if prod > n:
+                return False, {"error": "factor product exceeds n", "recomputed_product": prod}
             sigma *= (p ** (e + 1) - 1) // (p - 1)
 
         ok = (prod == n) and all_prime
         asserts = w.get("asserts", {}) or {}
+        if not isinstance(asserts, dict) or (
+            "sigma" in asserts and type(asserts["sigma"]) is not int
+        ) or ("perfect" in asserts and type(asserts["perfect"]) is not bool):
+            return None, {"error": "sigma must be an integer and perfect must be Boolean"}
         if "sigma" in asserts:
-            ok = ok and sigma == int(asserts["sigma"])
+            ok = ok and sigma == asserts["sigma"]
         if "perfect" in asserts:
-            ok = ok and (sigma - n == n) == bool(asserts["perfect"])
+            ok = ok and (sigma - n == n) == asserts["perfect"]
 
         return ok, {
             "kernel": "factorization",
@@ -442,6 +470,9 @@ def _method_kernels() -> dict[str, Any]:
 
 
 _KERNELS = {
+    "comb.v1": check_combinatorial,
+    "dfa_count.v1": check_automata_count,
+    "dfa_extremal.v1": check_automata_extremal,
     "factorization": check_factorization,
     "crt": check_crt,
     "unit_fraction": check_unit_fraction,

@@ -365,15 +365,14 @@ def test_unit_distance_declines_a_non_graph(conn):
 # --- the float shield -------------------------------------------------------
 
 def test_a_float_configuration_can_never_record_a_valid_certificate(conn):
-    """The probe returns true and the claim still must not. An approximate
-    construction is a candidate, and step 94's shield says so without anyone
-    having to remember that the coordinates were only nearly right."""
+    """The geometry gate and the ledger both preserve approximate candidates
+    as unverified, even when their displayed decimals happen to fit."""
     with conn.cursor() as cur:
         config = _config(cur, 2, "float_heuristic")
         _rational_points(cur, config, [(0, 0), (1, 0), (1, 1), (0, 1)])
         graph = _c4(cur)
 
-        assert _probe(cur, "comb.is_unit_distance(%s, %s)", config, graph)[0] is True
+        assert _probe(cur, "comb.is_unit_distance(%s, %s)", config, graph)[0] is None
 
         cur.execute("SELECT comb.unit_distance_claim(%s, %s)", (config, graph))
         claim = cur.fetchone()[0]

@@ -16,10 +16,10 @@ consistency, domination, frontier, enclosure — are re-derived here exactly,
 in Decimal, from the carried data alone. Whether a bound is TRUE is not: that
 lives in a separate claim in the ledger, and whether that claim still stands
 is a database question. So `optimal` can return False offline (something on
-record beats it, which needs no trust) but reaches True only when the caller
-carries the truth-claim's standing alongside the bound; otherwise it returns
-None. Reporting "optimal" from a bound set alone would be asserting a
-theorem, which this module is not in a position to do.
+record beats it, which needs no trust) but never reaches True from marker
+metadata alone. Mathematical optimality requires a typed exact certificate
+checking both feasibility and exclusion. Reporting "optimal" from a bound set
+alone would assert a theorem this module is not in a position to establish.
 
 Values are Decimal, never float. In binary floating point an enclosure width
 comes out narrower than it is, and a bound reported tighter than it is, is
@@ -248,8 +248,8 @@ def optimal(
            witness, no truth-claim, or a truth-claim whose standing is not
            carried or does not stand. "Best known on record" is a statement
            about the ledger, not about mathematics.
-    True   undominated, attained, and the carried standing of its
-           truth-claim is valid.
+    Legacy marker/standing metadata never establishes mathematical optimality.
+    Use a typed exact combinatorial certificate for a checked optimum.
     """
     target = next((b for b in bounds if b.id == bound_id), None)
     if target is None:
@@ -290,7 +290,10 @@ def optimal(
             "status": "best known on record",
         }
 
-    return True, {
+    return None, {
+        "reason": "frontier metadata and carried standing do not prove mathematical "
+                  "optimality; use a typed exact certificate",
+        "status": "best known on record",
         "bound_id": target.id,
         "value": str(target.value),
         "hypotheses": sorted(target.hypotheses),

@@ -38,7 +38,7 @@ artifacts AS (
 SELECT jsonb_build_object(
     'trunk_bundle_version', 1,
     'exported_at', now(),
-    'claims', jsonb_agg(
+    'claims', COALESCE(jsonb_agg(
         jsonb_build_object(
             'claim',       to_jsonb(cl),
             'certificate', jsonb_build_object(
@@ -67,8 +67,8 @@ SELECT jsonb_build_object(
                                     'registered_at', a.registered_at
                                 )
                            ELSE NULL END
-        )
-    )
+        ) ORDER BY cl.id
+    ), '[]'::jsonb)
 )
 FROM cert.claim cl
 JOIN latest_cert  lc ON lc.claim_id = cl.id

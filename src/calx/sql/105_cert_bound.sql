@@ -380,19 +380,10 @@ BEGIN
 END
 $$;
 
--- Optimality: nothing on record beats it, AND it is attained.
---
--- The two halves are deliberately different in kind. "Nothing on record
--- beats it" is a fact about the ledger and is checked here. "It is attained"
--- is mathematics, and is NOT checked here -- it is carried by attained_by
--- and, properly, by the claim in claim_id. So the probe returns:
---   ok = true   only when the bound is on the frontier AND attained_by is
---               present AND its truth-claim exists;
---   ok = false  when something on record dominates it (a real refutation of
---               optimality);
---   ok = NULL   when it is undominated but has no attaining witness --
---               "best known", which is not the same as optimal, and reads
---               as UNVERIFIED rather than valid.
+-- Legacy frontier query. A dominating registered bound refutes frontier status;
+-- otherwise the verdict is unknown, even with an attainment marker and a valid
+-- claim reference. Those metadata do not check feasibility or exclusion of a
+-- better construction. Typed comb120 certificates establish mathematical optima.
 CREATE OR REPLACE FUNCTION cert.bound_optimal(p_bound_id BIGINT)
 RETURNS TABLE (ok BOOLEAN, evidence JSONB)
 LANGUAGE plpgsql STABLE AS $$
@@ -458,8 +449,13 @@ BEGIN
         RETURN NEXT; RETURN;
     END IF;
 
-    ok := true;
+    -- A frontier marker and a true one-sided bound do not exclude a better
+    -- feasible construction. Typed objective/attainment certificates (comb120)
+    -- establish exact optima; this legacy API reports only ledger status.
+    ok := NULL;
     evidence := jsonb_build_object(
+        'reason', 'frontier metadata does not prove mathematical optimality; use a typed exact certificate',
+        'status', 'best known on record',
         'bound_id', b.id, 'value', b.value, 'hypotheses', b.hypotheses,
         'attained_by', b.attained_by, 'truth_claim', b.claim_id,
         'truth_claim_status', v_standing,

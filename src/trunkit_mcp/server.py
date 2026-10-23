@@ -13,6 +13,8 @@ Consumer tools (read-only, always available):
   arith_verify       — re-check an arithmetised claim's residual (97)
   congruence_verify  — re-check a CRT congruence certificate (101)
   bound_verify       — re-check a numeric-bound set's order structure (105)
+  comb_import/export/transform/search — portable finite structures and certificates
+  automata_count/product/extremal — exact language counts and finite-horizon proofs
 
 Prover tools (require TRUNKIT_ALLOW_WRITE=1 in env):
   claim_check        — re-run and record a certificate
@@ -81,6 +83,7 @@ mcp = FastMCP(
           standing        — query the cert ledger standing view
           claim_verify    — verify a single claim against the live DB
           claim_export    — export a portable proof bundle for claim IDs
+          porter_open     — read-only manifest-first certified handoff open
 
         Certificate-family verifiers (no DB needed):
           recurrence_verify — C-finite/P-finite recurrence regenerates a sequence
@@ -91,6 +94,8 @@ mcp = FastMCP(
           bound_verify      — numeric bounds: consistency, frontier, optimality
 
         Prover tools (only when TRUNKIT_ALLOW_WRITE=1):
+          porter_close/claim/release — certified handoffs and expiring work pickup
+          porter_open_and_gate — verify carried ledger and certify first-action decision
           claim_check     — re-run and record a certificate
           witness_attach  — attach a kernel-checkable proof witness
           attest_run      — run the formal attestation pass
@@ -127,7 +132,7 @@ def kernel_verify(witness_json: str) -> dict[str, Any]:
     cert.export_bundle entry). Supported schemas: factorization, crt,
     unit_fraction, matrix_word, dfa_betti, knot_alexander, plus the
     universal method kernels arith_check, quote_carry, csp_carry,
-    puzzle_parity (METHODS.md).
+    puzzle_parity (METHODS.md), comb.v1, dfa_count.v1, and dfa_extremal.v1.
 
     Returns verdict ("valid" | "refuted" | "unverified") and evidence dict.
     No database required.
@@ -143,6 +148,112 @@ def kernel_verify(witness_json: str) -> dict[str, Any]:
         "schema": witness.get("schema") if isinstance(witness, dict) else None,
         "evidence": evidence,
     }
+
+
+@mcp.tool()
+def comb_import(instance_json: str) -> dict[str, Any]:
+    """Normalize an immutable finite structure and return its content digest; no DB write."""
+    from calx.combinatorial import import_instance, instance_digest
+    try:
+        instance = import_instance(json.loads(instance_json))
+        return {"instance": instance, "instance_digest": instance_digest(instance)}
+    except (ValueError, TypeError, KeyError) as exc:
+        return {"verdict": "unverified", "error": str(exc)}
+
+
+@mcp.tool()
+def comb_export(
+    instance_json: str, predicate_json: str, certificate_json: str = "{}",
+) -> dict[str, Any]:
+    """Build a typed portable certificate bundle; construction does not imply verification."""
+    from calx.comb_cli import portable_bundle
+    from calx.combinatorial import make_witness
+    try:
+        return portable_bundle(make_witness(json.loads(instance_json), json.loads(predicate_json),
+                                           json.loads(certificate_json)))
+    except (ValueError, TypeError, KeyError) as exc:
+        return {"verdict": "unverified", "error": str(exc)}
+
+
+@mcp.tool()
+def comb_exclude(instance_json: str, colours: int, proof_text: str) -> dict[str, Any]:
+    """Import an external addition-only ASCII DRUP proof of graph non-colourability."""
+    from calx.comb_cli import portable_bundle
+    from calx.sat_adapter import make_colouring_exclusion
+    try:
+        return portable_bundle(make_colouring_exclusion(json.loads(instance_json), colours,
+                                                         proof_text))
+    except (ValueError, TypeError, KeyError) as exc:
+        return {"verdict": "unverified", "error": str(exc)}
+
+
+@mcp.tool()
+def comb_transform(witness_json: str, operation: str, mapping_json: str = "[]",
+                   other_json: str = "{}") -> dict[str, Any]:
+    """Checked relabeling or disjoint-union construction with carried premises."""
+    from calx.combinatorial import disjoint_union_witness, relabel_witness
+    try:
+        witness = json.loads(witness_json)
+        if operation == "relabel":
+            result = relabel_witness(witness, json.loads(mapping_json))
+        elif operation == "disjoint_union":
+            result = disjoint_union_witness([witness, json.loads(other_json)])
+        else:
+            raise ValueError("unsupported construction operation")
+        ok, evidence = verify_witness(result)
+        return {"verdict": _ok_label(ok), "witness": result, "evidence": evidence}
+    except (ValueError, TypeError, KeyError) as exc:
+        return {"verdict": "unverified", "error": str(exc)}
+
+
+@mcp.tool()
+def comb_search(instance_json: str, colours: int, max_steps: int = 100000) -> dict[str, Any]:
+    """Bounded colouring producer; a failed search remains unverified, never an UNSAT proof."""
+    from calx.comb_cli import bounded_colouring
+    try:
+        return bounded_colouring(json.loads(instance_json), colours, max_steps)
+    except (ValueError, TypeError, KeyError) as exc:
+        return {"verdict": "unverified", "error": str(exc)}
+
+
+@mcp.tool()
+def automata_count(
+    dfa_json: str, max_length: int, annihilator_json: str = "null",
+) -> dict[str, Any]:
+    """Exact accepted-word counts, with an optional all-length matrix recurrence certificate."""
+    from calx.automata_count import export_count_witness
+    try:
+        witness = export_count_witness(json.loads(dfa_json), max_length,
+                                       annihilator=json.loads(annihilator_json))
+        ok, evidence = verify_witness(witness)
+        return {"verdict": _ok_label(ok), "witness": witness, "evidence": evidence}
+    except (ValueError, TypeError, KeyError) as exc:
+        return {"verdict": "unverified", "error": str(exc)}
+
+
+@mcp.tool()
+def automata_extremal(automaton_json: str, horizon: int, sense: str = "best") -> dict[str, Any]:
+    """Certify an integer-weighted DFA optimum using locally checked Bellman inequalities."""
+    from calx.automata_count import export_extremal_witness
+    try:
+        witness = export_extremal_witness(json.loads(automaton_json), horizon, sense)
+        ok, evidence = verify_witness(witness)
+        return {"verdict": _ok_label(ok), "witness": witness, "evidence": evidence}
+    except (ValueError, TypeError, KeyError) as exc:
+        return {"verdict": "unverified", "error": str(exc)}
+
+
+@mcp.tool()
+def automata_product(left_json: str, right_json: str, operation: str = "intersection",
+                     state_budget: int = 256, transition_budget: int = 16384) -> dict[str, Any]:
+    """Construct a bounded synchronous DFA product; budget exhaustion returns no truncated DFA."""
+    from calx.automata_count import product_dfa
+    try:
+        return {"dfa": product_dfa(json.loads(left_json), json.loads(right_json), operation,
+                                    state_budget=state_budget,
+                                    transition_budget=transition_budget)}
+    except (ValueError, TypeError, KeyError) as exc:
+        return {"verdict": "unverified", "error": str(exc)}
 
 
 @mcp.tool()
@@ -162,12 +273,23 @@ def ledger_chain(bundle_json: str) -> dict[str, Any]:
         return {"error": f"invalid JSON: {exc}"}
 
     results = verify_chain(bundle)
-    all_ok = bool(results) and all(
-        r["content_ok"] and r.get("premises_ok", True) and r.get("witness_ok") is not False
+    # A legacy export without stored hashes has no chain evidence. Distinguish
+    # that from a carried hash that fails to recompute, which is a refutation.
+    failed = any(
+        (r["stored_row_hash"] is not None and not r["content_ok"])
+        or r.get("claim_bound") is False
+        or not r.get("premises_ok", True) or r.get("witness_ok") is False
         for r in results
     )
+    missing = not results or any(r["stored_row_hash"] is None for r in results)
+    verdict = "refuted" if failed else "unverified" if missing else "valid"
+    for result in results:
+        if result["stored_row_hash"] is None:
+            result["content_ok"] = None
+            result["reason"] = "stored row hash absent; chain evidence unavailable"
     return {
-        "chain_ok": all_ok,
+        "verdict": verdict,
+        "chain_ok": False if failed else None if missing else True,
         "claim_count": len(results),
         "claims": results,
     }
@@ -427,7 +549,7 @@ def morphism_verify(
 
 @mcp.tool()
 def commitment_verify(
-    root: str, leaves_json: str | None = None, claim_json: str | None = None
+    root: str, leaves_json: str = "", claim_json: str = ""
 ) -> dict[str, Any]:
     """Verify a holographic (Merkle) commitment against a carried root.
 
@@ -441,11 +563,12 @@ def commitment_verify(
     cert.merkle_root) and compares. Any tampered leaf flips the verdict to
     "refuted". No database.
     """
-    if (leaves_json is None) == (claim_json is None):
+    # Plain str annotations prevent FastMCP pre-parsing JSON strings into objects.
+    if bool(leaves_json) == bool(claim_json):
         return {"verdict": "unverified",
                 "error": "pass exactly one of leaves_json or claim_json"}
     try:
-        if leaves_json is not None:
+        if leaves_json:
             leaves = json.loads(leaves_json)
             if not isinstance(leaves, list) or not all(isinstance(x, str) for x in leaves):
                 return {"verdict": "unverified", "error": "leaves must be a list of strings"}
@@ -473,7 +596,7 @@ def commitment_verify(
 
 
 @mcp.tool()
-def arith_verify(phi_json: str, interp_json: str | None = None, x: int = 0) -> dict[str, Any]:
+def arith_verify(phi_json: str, interp_json: str = "", x: int = 0) -> dict[str, Any]:
     """Verify an arithmetised first-order claim: valid iff the residual vanishes.
 
     ``phi_json`` — the predicate AST as JSON: {"op": <ctor>, "args": [...]},
@@ -570,9 +693,9 @@ def bound_verify(
     bound dominates another only if it is at least as tight AND assumes no
     more, so a sharper conditional bound supersedes nothing. A lower bound
     above an upper one refutes — the pair cannot both hold, and both are
-    named. Optimality reaches "valid" only when the bound is undominated,
-    attained, and carries a truth-claim whose standing is valid; undominated
-    alone is "best known on record", which is unverified. Whether a bound is
+    named. Undominated bounds are "best known on record", which is unverified.
+    Legacy standing and attainment metadata never establish mathematical
+    optimality; use a typed exact combinatorial certificate for that. Whether a bound is
     TRUE is a separate claim and is not judged here. No database.
     """
     try:
@@ -620,6 +743,122 @@ def _require_write() -> dict[str, Any] | None:
             "hint": "Set TRUNKIT_ALLOW_WRITE=1 in the server environment to enable prover tools.",
         }
     return None
+
+
+def _porter_json(value: str, expected: type, label: str):
+    decoded = json.loads(value)
+    if not isinstance(decoded, expected):
+        raise ValueError(f"{label} must be a JSON {expected.__name__}")
+    return decoded
+
+
+def _porter_call(operation: str, *args, **kwargs) -> dict[str, Any]:
+    try:
+        from nerode import porter
+        return getattr(porter, operation)(*args, **kwargs)
+    except Exception as exc:
+        return {"verdict": "unverified", "error": str(exc)}
+
+
+@mcp.tool()
+def porter_open(
+    envelope_json: str, receiver_session: str = "", payload_keys_json: str = "[]",
+    claim_token: str = "", max_payload_bytes: int = 65536,
+) -> dict[str, Any]:
+    """Read-only verified Porter v2 open: manifest and health first.
+
+    Select payload keys to inline immutable values within the same request's
+    byte budget. Claim-once payload access requires the active receiver token;
+    manifest-only audit opens remain repeatable. Legacy v1 yields an explicit
+    version error. Uses NERODE_DSN, separately from the CALX_DSN proof ledger.
+    """
+    try:
+        envelope = _porter_json(envelope_json, dict, "envelope")
+        keys = _porter_json(payload_keys_json, list, "payload_keys")
+    except ValueError as exc:
+        return {"verdict": "unverified", "error": str(exc)}
+    return _porter_call("open", envelope, receiver_session=receiver_session or None,
+                        payload_keys=keys, claim_token=claim_token or None,
+                        max_payload_bytes=max_payload_bytes)
+
+
+@mcp.tool()
+def porter_close(
+    session_id: str, payloads_json: str = "{}", ledger_entries_json: str = "[]",
+    attention_hint: str = "", intended_receiver: str = "", mode: str = "reopenable",
+    max_envelope_bytes: int = 65536,
+) -> dict[str, Any]:
+    """Atomically store payloads and typed ledger entries, then certify a v2 handoff.
+
+    Requires TRUNKIT_ALLOW_WRITE=1. ledger_entries_json is an array of
+    {path,value,schema_type} objects. The returned envelope contains per-key
+    hashes and a carried ledger; payload values stay in an immutable snapshot.
+    mode is reopenable (default) or claim_once. Uses NERODE_DSN.
+    """
+    guard = _require_write()
+    if guard:
+        return guard
+    try:
+        payloads = _porter_json(payloads_json, dict, "payloads")
+        entries = _porter_json(ledger_entries_json, list, "ledger_entries")
+    except ValueError as exc:
+        return {"verdict": "unverified", "error": str(exc)}
+    return _porter_call("close", session_id, payloads=payloads, ledger_entries=entries,
+                        attention_hint=attention_hint or None,
+                        intended_receiver=intended_receiver or None, mode=mode,
+                        max_envelope_bytes=max_envelope_bytes)
+
+
+@mcp.tool()
+def porter_claim(
+    envelope_json: str, receiver_session: str, lease_seconds: int = 300,
+) -> dict[str, Any]:
+    """Acquire one atomic, expiring claim_once lease. Requires TRUNKIT_ALLOW_WRITE=1."""
+    guard = _require_write()
+    if guard:
+        return guard
+    try:
+        envelope = _porter_json(envelope_json, dict, "envelope")
+    except ValueError as exc:
+        return {"verdict": "unverified", "error": str(exc)}
+    return _porter_call("claim", envelope, receiver_session, lease_seconds=lease_seconds)
+
+
+@mcp.tool()
+def porter_release(envelope_json: str, claim_token: str) -> dict[str, Any]:
+    """Release a live claim using its current token. Requires TRUNKIT_ALLOW_WRITE=1."""
+    guard = _require_write()
+    if guard:
+        return guard
+    try:
+        envelope = _porter_json(envelope_json, dict, "envelope")
+    except ValueError as exc:
+        return {"verdict": "unverified", "error": str(exc)}
+    return _porter_call("release", envelope, claim_token)
+
+
+@mcp.tool()
+def porter_open_and_gate(
+    envelope_json: str, receiver_session: str, tool: str, args_json: str = "{}",
+    claim_token: str = "",
+) -> dict[str, Any]:
+    """Recommended first-action path: verify, restore ledger, certify ALLOW/REVISE/BLOCK.
+
+    Requires TRUNKIT_ALLOW_WRITE=1 because receiver state and a replayable gate
+    decision are recorded. Register environment-changing tools and policies in
+    Nerode before use; unregistered tools retain existing allow semantics.
+    Claim-once envelopes require an active token. Returns prior-session health.
+    """
+    guard = _require_write()
+    if guard:
+        return guard
+    try:
+        envelope = _porter_json(envelope_json, dict, "envelope")
+        args = _porter_json(args_json, dict, "args")
+    except ValueError as exc:
+        return {"verdict": "unverified", "error": str(exc)}
+    return _porter_call("open_and_gate", envelope, receiver_session, tool, args,
+                        claim_token=claim_token or None)
 
 
 @mcp.tool()

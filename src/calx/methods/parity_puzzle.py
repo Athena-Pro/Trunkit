@@ -98,12 +98,13 @@ class Puzzle:
 
     def claim_check(self, st, witness=None) -> tuple[str, str]:
         """Verdict for the claim 'st is solvable'."""
-        if witness is not None:
-            return self.kernel_verify(st, witness)
         if not self.solvable(st):
             return ("refuted",
                     f"parity invariant I={self.feature(st)} (must be +1) — "
                     "unsolvable, no witness exists")
+        if witness is not None:
+            status, detail = self.kernel_verify(st, witness)
+            return (status if status == "valid" else "unverified", detail)
         return ("unverified", "solvable by parity, but no witness attached")
 
     def solve(self, st):

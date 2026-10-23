@@ -61,6 +61,8 @@ SCHEMA_FILES = (
     "B4_carry.sql",             # Phase 5e — carry the ledger across the Porter handoff
     # Phase 6 — unified witness-kind re-verification.
     "C0_verify.sql",            # Phase 6a — nerode.verify() dispatches by witness kind
+    "D0_count.sql",             # Exact all-symbol language enumeration
+    "E0_porter.sql",            # Porter v2 immutable snapshots + bounded opens + claims
     # Applied by the old `ls | sort` Makefile/CI loop but absent from this tuple,
     # so they reached hand-applied databases and never the ones built by
     # apply_schema (every test DB included). Listed here as the precondition for

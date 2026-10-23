@@ -27,6 +27,7 @@ import pytest
 
 from calx.bundle import load_bundle, validate_bundle, verify_bundle
 from calx.ledger import CLAIM_DIGEST_KIND, certificate_row_hash, claim_digest, witness_row_hash
+from calx.proposition import witness_subject_ref
 from tests.dbskip import connect_or_skip
 
 
@@ -46,6 +47,9 @@ def _entry(
             "statement": statement,
             "method": method,
             "probe_sql": probe_sql,
+            "subject_ref": witness_subject_ref(witness["body"]) if (
+                witness and isinstance(witness.get("body"), dict)
+            ) else {},
         },
         "certificate": {"seq": 1, "status": cert_status},
         "witness": witness,

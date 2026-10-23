@@ -17,13 +17,11 @@ Non-minimal fixtures use the "extra accepting state" construction:
 
 from __future__ import annotations
 
-import psycopg
+import pytest
 
 from nerode.automata import import_to_db
 from nerode.db import apply_schema
 from tests.dbskip import connect_or_skip
-
-DSN = "postgresql://nerode:nerode@localhost:5435/nerode"
 
 # ---------------------------------------------------------------------------
 # Non-minimal test fixtures
@@ -82,12 +80,9 @@ NON_MINIMAL_CYCLE6 = {
 # Fixtures
 # ---------------------------------------------------------------------------
 
-import pytest
-
-
 @pytest.fixture(scope="module")
-def conn():
-    c = connect_or_skip(DSN)
+def conn(nerode_dsn):
+    c = connect_or_skip(nerode_dsn)
     apply_schema(c)
     yield c
     c.rollback()

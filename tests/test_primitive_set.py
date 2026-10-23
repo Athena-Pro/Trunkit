@@ -124,7 +124,7 @@ def test_an_unparsable_label_makes_the_probe_refuse(conn):
         cur.execute("UPDATE comb.element SET label = 'x' WHERE idx = 0"
                     " AND structure_id = comb.structure_id(%s)", (subject,))
         ok, ev = _probe(cur, subject)
-        assert ok is False
+        assert ok is None
         assert "not decidable here" in ev["reason"]
         assert ev["unlabelled_or_unparsable"] == 1
 
@@ -134,7 +134,7 @@ def test_unlabelled_elements_are_refused_too(conn):
         subject = f"pset-{uuid.uuid4()}"
         cur.execute("SELECT comb.register_structure(%s,'set_system',3,'test')", (subject,))
         ok, ev = _probe(cur, subject)
-        assert ok is False
+        assert ok is None
         assert ev["unlabelled_or_unparsable"] == 3
 
 

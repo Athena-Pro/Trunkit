@@ -214,7 +214,7 @@ def test_parity_three_verdicts():
 
     bad = moves[:-2] if len(moves) > 2 else ["U"]
     wrong, ev = _parity(scrambled, moves=list(bad))
-    assert wrong is False
+    assert wrong is None
 
 
 def test_parity_unsolvable_is_the_certificate():

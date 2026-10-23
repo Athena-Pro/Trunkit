@@ -591,6 +591,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub = p.add_subparsers(dest="command", required=True)
 
+    from .comb_cli import add_parsers
+    add_parsers(sub)
+
     # --- consumer ---
     v = sub.add_parser(
         "verify",
@@ -668,7 +671,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --- calx data ---
     qs = sub.add_parser(
         "quickstart",
-        help="write docker-compose, start both databases, apply both schemas",
+        help="start both databases or use external PostgreSQL, then apply schemas",
     )
     qs.add_argument(
         "--dir", default=".", metavar="DIR",
@@ -677,6 +680,10 @@ def build_parser() -> argparse.ArgumentParser:
     qs.add_argument(
         "--compose-only", action="store_true",
         help="only write the compose file; do not start containers or apply schemas",
+    )
+    qs.add_argument(
+        "--no-docker", action="store_true",
+        help="use two explicitly configured PostgreSQL instances; never invoke Docker",
     )
     qs.add_argument(
         "--nerode-dsn", default=None,

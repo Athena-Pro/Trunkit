@@ -101,11 +101,13 @@ BEGIN
     SELECT COUNT(*) INTO v_unparsed
       FROM comb.element
      WHERE structure_id = v_sid
-       AND (label IS NULL OR label !~ '^[1-9][0-9]*$');
+       AND (label IS NULL OR label !~ '^[1-9][0-9]*$' OR length(label)>1234
+            OR CASE WHEN label ~ '^[1-9][0-9]*$' AND length(label)<=1234
+                    THEN label::NUMERIC >= power(2::NUMERIC,4096) ELSE false END);
     IF v_unparsed > 0 THEN
-        ok := false;
+        ok := NULL;
         evidence := jsonb_build_object(
-            'reason', 'elements without a positive-integer label -- not decidable here',
+            'reason', 'elements without a positive-integer label within the 4096-bit budget -- not decidable here',
             'structure', p_subject, 'unlabelled_or_unparsable', v_unparsed);
         RETURN NEXT; RETURN;
     END IF;
@@ -119,17 +121,17 @@ BEGIN
          GROUP BY label HAVING COUNT(*) > 1) d;
 
     SELECT COALESCE(jsonb_agg(jsonb_build_object(
-               'divisor', a.label::BIGINT, 'multiple', b.label::BIGINT,
-               'quotient', b.label::BIGINT / a.label::BIGINT)
-               ORDER BY a.label::BIGINT, b.label::BIGINT), '[]'::jsonb),
+               'divisor', a.label::NUMERIC, 'multiple', b.label::NUMERIC,
+               'quotient', div(b.label::NUMERIC, a.label::NUMERIC))
+               ORDER BY a.label::NUMERIC, b.label::NUMERIC), '[]'::jsonb),
            COUNT(*)
       INTO v_chains, v_bad
       FROM comb.element a
       JOIN comb.element b
         ON b.structure_id = a.structure_id
-       AND a.label::BIGINT < b.label::BIGINT          -- strict: excludes duplicates
+       AND a.label::NUMERIC < b.label::NUMERIC          -- strict: excludes duplicates
      WHERE a.structure_id = v_sid
-       AND b.label::BIGINT % a.label::BIGINT = 0;
+       AND b.label::NUMERIC % a.label::NUMERIC = 0;
 
     IF v_bad > 0 THEN
         ok := false;
@@ -144,7 +146,7 @@ BEGIN
     ok := true;
     evidence := jsonb_build_object(
         'structure', p_subject, 'elements', v_n,
-        'pairs_checked', (v_n * (v_n - 1)) / 2,
+        'pairs_checked', (v_n::BIGINT * (v_n - 1)) / 2,
         'repeated_labels', v_dups,
         'note', 'primitive: no element divides another. Says nothing about #1196.');
     RETURN NEXT;

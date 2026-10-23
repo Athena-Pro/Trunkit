@@ -91,3 +91,42 @@ def test_explicit_nerode_dsn_is_exposed_by_cli():
     ])
     assert args.dsn == "trunk-explicit"
     assert args.nerode_dsn == "nerode-explicit"
+
+
+
+def test_no_docker_requires_explicit_targets_without_files_or_connections(bootstrap):
+    args, start, wait, apply = bootstrap
+    args.no_docker = True
+    assert quickstart.run(args) == 2
+    start.assert_not_called()
+    wait.assert_not_called()
+    apply.assert_not_called()
+    from pathlib import Path
+    assert not (Path(args.dir) / quickstart.COMPOSE_FILE).exists()
+
+
+def test_no_docker_applies_both_schemas_without_compose(bootstrap, monkeypatch):
+    args, start, wait, apply = bootstrap
+    args.no_docker = True
+    monkeypatch.setenv("CALX_DSN", "postgresql://localhost:6544/test")
+    monkeypatch.setenv("NERODE_DSN", "postgresql://localhost:6545/test")
+    assert quickstart.run(args) == 0
+    start.assert_not_called()
+    apply.assert_called_once_with(
+        "postgresql://localhost:6544/test", "postgresql://localhost:6545/test",
+    )
+    from pathlib import Path
+    assert not (Path(args.dir) / quickstart.COMPOSE_FILE).exists()
+
+
+def test_no_docker_rejects_compose_only(bootstrap):
+    args, start, wait, apply = bootstrap
+    args.no_docker = args.compose_only = True
+    assert quickstart.run(args) == 2
+    wait.assert_not_called()
+    apply.assert_not_called()
+
+
+def test_no_docker_is_exposed_by_cli():
+    args = build_parser().parse_args(["quickstart", "--no-docker"])
+    assert args.no_docker

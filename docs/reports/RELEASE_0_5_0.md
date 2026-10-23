@@ -121,8 +121,10 @@ fact; #1196 is not.
   must not be the base dependency. The libpq-free path is `trunkit[binary]` — a real
   extra, now CI-smoke-tested on Linux alongside `[binary,mcp]`. Platform markers are not
   an alternative: they cannot separate glibc, musl and Termux/Android.
-- **`mcp<2`** (`trunkit_mcp` uses the 1.x fastmcp API) and **`pydantic-settings<2.13`**
-  (1.x `Settings` warns on an unresolved lifespan forward ref; warnings are errors here).
+- **`mcp>=1.30,<2`** keeps the supported FastMCP 1.x API and includes the upstream
+  Settings model fix, removing the old `pydantic-settings<2.13` workaround. The
+  new **`[muse]`** extra installs both MCP and bundled libpq; installed-wheel CI
+  exercises real stdio discovery, JSON-string arguments and external PostgreSQL.
 - `test_sources.py` took the `nerode_dsn` fixture and discarded it, so every `Precacher`
   fell back to `NERODE_DSN` or a hardcoded 5435 while the fixture read as if the test DSN
   were respected.

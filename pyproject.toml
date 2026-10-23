@@ -56,11 +56,15 @@ image = [
   "pillow>=10",
 ]
 mcp = [
-  # trunkit_mcp currently uses mcp.server.fastmcp, the MCP 1.x API.
-  "mcp>=1.0.0,<2",
-  # MCP 1.x's Settings model warns under pydantic-settings 2.13+ because its
-  # lifespan forward reference is unresolved; warnings are errors in our CI.
-  "pydantic-settings>=2.5.2,<2.13",
+  # FastMCP uses the maintained 1.x API; 1.30 includes the Settings model fix
+  # needed by current Pydantic/settings releases. Test this floor over stdio.
+  "mcp>=1.30,<2",
+]
+# One install for agent VMs with neither system libpq nor an MCP SDK.
+# Keep the base pure Python for Termux and other unsupported binary platforms.
+muse = [
+  "psycopg[binary]>=3.2,<4",
+  "mcp>=1.30,<2",
 ]
 dev = [
   "psycopg[binary]>=3.2,<4",
@@ -68,9 +72,9 @@ dev = [
   "pytest-cov>=5",
   "ruff>=0.6",
   "build>=1.0",
+  "hatchling",  # execute installed-wheel tests in clean CI environments
   "twine>=5.0",
-  "mcp>=1.0.0,<2",
-  "pydantic-settings>=2.5.2,<2.13",
+  "mcp>=1.30,<2",
 ]
 
 [project.scripts]

@@ -227,8 +227,8 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ---------------------------------------------------------------------------
--- 5. export_bundle v1 + lifecycle (the ledger overlay's v2 carries the same
---    keys; a bundle consumer treats `revocation` as verdict-degrading)
+-- 5. export_bundle + lifecycle. Preserve stored ledger commitments when the
+--    optional ledger extension is installed; never manufacture them on export.
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION cert.export_bundle(p_claim_ids BIGINT[])
@@ -237,14 +237,16 @@ WITH
 latest_cert AS (
     SELECT DISTINCT ON (claim_id)
            claim_id, id AS cert_id, seq, status, evidence, valid_under,
-           checked_at, signer_id
-      FROM cert.certificate
+           checked_at, signer_id, checker_inference_id,
+           to_jsonb(ce) AS stored_certificate
+      FROM cert.certificate ce
      WHERE claim_id = ANY(p_claim_ids)
      ORDER BY claim_id, seq DESC
 ),
 latest_witness AS (
     SELECT DISTINCT ON (w.certificate_id)
-           w.certificate_id, w.kind AS witness_kind, w.body AS witness_body
+           w.certificate_id, w.kind AS witness_kind, w.body AS witness_body,
+           to_jsonb(w)->'row_hash' AS witness_row_hash
       FROM cert.witness w
       JOIN latest_cert lc ON lc.cert_id = w.certificate_id
      ORDER BY w.certificate_id, w.id DESC
@@ -294,15 +296,23 @@ cert_history AS (
                'valid_under', valid_under,
                'checked_at',  checked_at,
                'signer_id',   signer_id
-           ) ORDER BY seq) AS history
-      FROM cert.certificate
+           ) || CASE WHEN to_jsonb(ce) ? 'row_hash' THEN jsonb_build_object(
+               'cert_id', ce.id, 'row_hash', to_jsonb(ce)->'row_hash',
+               'prev_hash', to_jsonb(ce)->'prev_hash') ELSE '{}'::jsonb END
+           ORDER BY seq) AS history
+      FROM cert.certificate ce
      WHERE claim_id = ANY(p_claim_ids)
      GROUP BY claim_id
+),
+ledger_support AS (
+    SELECT EXISTS (SELECT 1 FROM pg_attribute
+        WHERE attrelid = 'cert.certificate'::regclass
+          AND attname = 'row_hash' AND NOT attisdropped) AS installed
 )
 SELECT jsonb_build_object(
-    'trunk_bundle_version', 1,
+    'trunk_bundle_version', CASE WHEN (SELECT installed FROM ledger_support) THEN 2 ELSE 1 END,
     'exported_at', now(),
-    'claims', jsonb_agg(
+    'claims', COALESCE(jsonb_agg(
         jsonb_build_object(
             'claim',       to_jsonb(cl),
             'certificate', jsonb_build_object(
@@ -312,10 +322,22 @@ SELECT jsonb_build_object(
                                'valid_under', lc.valid_under,
                                'checked_at',  lc.checked_at,
                                'signer_id',   lc.signer_id
-                           ),
+                           ) || CASE WHEN lc.stored_certificate ? 'row_hash'
+                           THEN jsonb_build_object(
+                               'cert_id', lc.cert_id,
+                               'row_hash', lc.stored_certificate->'row_hash',
+                               'prev_hash', lc.stored_certificate->'prev_hash',
+                               'premise_hashes', lc.stored_certificate->'premise_hashes',
+                               'inference_hash', (SELECT to_jsonb(i)->'row_hash'
+                                   FROM curry.inferences i
+                                   WHERE i.inference_id = lc.checker_inference_id)
+                           ) ELSE '{}'::jsonb END,
             'certificate_history', COALESCE(ch.history, '[]'::jsonb),
             'witness',     CASE WHEN lw.witness_kind IS NOT NULL
                            THEN jsonb_build_object('kind', lw.witness_kind, 'body', lw.witness_body)
+                               || CASE WHEN lc.stored_certificate ? 'row_hash'
+                               THEN jsonb_build_object('row_hash', lw.witness_row_hash)
+                               ELSE '{}'::jsonb END
                            ELSE NULL END,
             'derivation',  CASE WHEN d.conclusion_id IS NOT NULL
                            THEN jsonb_build_object(
@@ -342,9 +364,14 @@ SELECT jsonb_build_object(
                                     'revoked_at', r.revoked_at
                                 )
                            ELSE NULL END
-        )
-    )
-)
+        ) ORDER BY cl.id
+    ), '[]'::jsonb)
+) || CASE WHEN (SELECT installed FROM ledger_support)
+     THEN jsonb_build_object(
+         'ledger_root', (SELECT to_jsonb(ce)->'row_hash' FROM cert.certificate ce
+                         ORDER BY ce.id DESC LIMIT 1),
+         'ledger_height', (SELECT count(*) FROM cert.certificate))
+     ELSE '{}'::jsonb END
 FROM cert.claim cl
 JOIN latest_cert  lc ON lc.claim_id = cl.id
 LEFT JOIN latest_witness lw ON lw.certificate_id = lc.cert_id

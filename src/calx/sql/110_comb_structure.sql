@@ -230,8 +230,12 @@ DECLARE
 BEGIN
     v_sid := comb.structure_id(p_subject);
 
-    IF p_elements IS NULL OR cardinality(p_elements) = 0 THEN
-        RAISE EXCEPTION 'comb.add_block: a block needs at least one element';
+    IF p_elements IS NULL THEN
+        RAISE EXCEPTION 'comb.add_block: elements must be an explicit array';
+    END IF;
+    IF cardinality(p_elements) = 0 AND EXISTS (
+        SELECT 1 FROM comb.structure WHERE id = v_sid AND kind IN ('graph','digraph')) THEN
+        RAISE EXCEPTION 'comb.add_block: a graph block needs at least one element';
     END IF;
     IF cardinality(p_elements) <> cardinality(ARRAY(SELECT DISTINCT unnest(p_elements))) THEN
         RAISE EXCEPTION
@@ -393,7 +397,7 @@ BEGIN
         SELECT jsonb_agg(f) FROM (
             SELECT jsonb_build_object(
                        'fault', CASE
-                           WHEN a.arity = 0 THEN 'empty block'
+                           WHEN a.arity = 0 AND s.kind IN ('graph','digraph') THEN 'empty block'
                            WHEN s.kind IN ('graph', 'digraph') AND a.arity <> 2
                                THEN 'block arity is not 2'
                            WHEN s.kind = 'digraph' AND NOT a.is_arc
@@ -416,7 +420,7 @@ BEGIN
                         ON i.structure_id = b.structure_id AND i.block_idx = b.idx
                      WHERE b.structure_id = s.id
                      GROUP BY b.idx) a
-             WHERE a.arity = 0
+             WHERE (a.arity = 0 AND s.kind IN ('graph','digraph'))
                 OR (s.kind IN ('graph', 'digraph') AND a.arity <> 2)
                 OR (s.kind = 'digraph' AND NOT a.is_arc)
                 OR (s.kind = 'graph' AND a.positioned)

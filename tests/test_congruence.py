@@ -97,7 +97,7 @@ def conn():
 def test_sql_crt_matches_python(conn, case):
     remainders, moduli, expected = case
     with conn.cursor() as cur:
-        cur.execute("SELECT crt(%s::bigint[], %s::bigint[])", (remainders, moduli))
+        cur.execute("SELECT calx.crt(%s::bigint[], %s::bigint[])", (remainders, moduli))
         sql_solution = cur.fetchone()[0]
     assert sql_solution == cong.crt(remainders, moduli) == expected
 

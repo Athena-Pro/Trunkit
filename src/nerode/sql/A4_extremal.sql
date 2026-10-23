@@ -1,28 +1,25 @@
 -- =============================================================================
 --  nerode — Step A4: Exact extremal payoff analysis  [Phase 4]
 --
---  Implements Theorem 3 of arXiv:2606.11223: exact best-case / worst-case payoff
---  over the scenario-restricted product (A3), with an interpretable WITNESS
---  finance word realizing the extremum.
+--  Exact finite-horizon best/worst payoff for deterministic weighted automata
+--  whose local expressions are affine with interval guards. Other syntax,
+--  including nested maxima, yields an explicit unsupported result.
 --
 --  Two ingredients:
 --   (1) Per-transition optimizer. Each step's data value dᵢ is chosen freely in
 --       the admissible interval, and steps are INDEPENDENT (each has its own dᵢ)
 --       and accumulate additively (⊗ = +). So the global optimum decomposes:
 --       optimise each transition's payoff over its interval, then optimise the
---       PATH. For the linear finance semiring the payoff is piecewise-linear in
---       d, so its extremum on an interval is attained at an endpoint or an
---       internal breakpoint (a guard boundary, or an ⊕ crossover of affine
---       pieces). payoff_opt() evaluates exactly that finite candidate set.
+--       PATH. An affine expression on a closed bounded interval attains its
+--       optimum at an endpoint. Unbounded objectives are flagged explicitly.
 --   (2) Max-plus DP over the product unrolled to a horizon. best = longest path,
 --       worst = shortest path (worst-case sound for deterministic products, per
 --       the paper). Backpointers reconstruct the witness word, exactly like the
 --       predecessor chain in nerode.equivalent (04_product.sql).
 --
 --  Depends on: A0..A3, 01_schema. Idempotent.
---  NOTE: starter file — not yet executed against a live database. Exact for
---  piecewise-linear payoffs; admissible intervals are assumed bounded above
---  (an unbounded interval with an increasing payoff yields +∞ and is flagged).
+--  A realizing word is evidence of attainment. Portable optimality claims
+--  additionally need an independently checked bound (see A5).
 -- =============================================================================
 
 -- ---------------------------------------------------------------------------
@@ -47,8 +44,9 @@ END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
 -- ---------------------------------------------------------------------------
--- payoff_breakpoints(expr) → NUMERIC[]  candidate interior optima:
---   guard boundaries, and ⊕ crossovers of affine children.
+-- payoff_breakpoints(expr) → NUMERIC[]  heuristic candidate breakpoints:
+--   guard boundaries, and ⊕ crossovers of affine children. Incomplete for
+--   nested maxima; NOT used by the certified optimizer.
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION nerode.payoff_breakpoints(p JSONB)
 RETURNS NUMERIC[] AS $$
@@ -89,6 +87,58 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 --   Optimum of the (folded) transition payoff over its feasible domain, with
 --   the argmax/argmin data value. sense ∈ {'best','worst'}.
 -- ---------------------------------------------------------------------------
+-- The original breakpoint collector is insufficient for nested maxima: e.g.
+-- max(max(d,0),3-d) on [0,4] has an interior minimum at 3/2 which it misses.
+-- Until an exact rational upper-envelope checker exists, certify only affine
+-- expressions and intersections of their interval guards. Unsupported and
+-- unbounded objectives are explicit non-decisions, never finite optima.
+CREATE OR REPLACE FUNCTION nerode.payoff_supported_affine(p JSONB)
+RETURNS BOOLEAN LANGUAGE plpgsql IMMUTABLE AS $$
+DECLARE v_key TEXT; v_guard JSONB; v_iv JSONB;
+BEGIN
+    IF p IS NULL OR jsonb_typeof(p)<>'object' THEN
+        RETURN FALSE;
+    END IF;
+    IF (SELECT count(*) FROM jsonb_object_keys(p))<>1 THEN RETURN FALSE; END IF;
+    SELECT key INTO v_key FROM jsonb_each(p);
+    IF v_key IN ('const','bind') THEN
+        RETURN jsonb_typeof(p->v_key)='number';
+    ELSIF v_key='otimes' THEN
+        IF jsonb_typeof(p->v_key)<>'array' OR jsonb_array_length(p->v_key)<>2 THEN
+            RETURN FALSE;
+        END IF;
+        RETURN nerode.payoff_supported_affine(p->v_key->0)
+           AND nerode.payoff_supported_affine(p->v_key->1);
+    ELSIF v_key='guard' THEN
+        v_guard := p->v_key;
+        IF jsonb_typeof(v_guard)<>'object' OR NOT v_guard ? 'iv'
+           OR NOT v_guard ? 'then' THEN RETURN FALSE; END IF;
+        v_iv := v_guard->'iv';
+        IF jsonb_typeof(v_iv)<>'object' THEN RETURN FALSE; END IF;
+        IF EXISTS (SELECT 1 FROM jsonb_object_keys(v_iv) k WHERE k NOT IN ('lo','hi','empty'))
+           OR (v_iv ? 'lo' AND jsonb_typeof(v_iv->'lo')<>'number')
+           OR (v_iv ? 'hi' AND (jsonb_typeof(v_iv->'hi')<>'number' OR NOT v_iv ? 'lo'))
+           OR (v_iv ? 'empty' AND jsonb_typeof(v_iv->'empty')<>'boolean') THEN
+            RETURN FALSE;
+        END IF;
+        RETURN nerode.payoff_supported_affine(v_guard->'then');
+    END IF;
+    RETURN FALSE;
+END $$;
+
+CREATE OR REPLACE FUNCTION nerode.payoff_affine_domain(p JSONB)
+RETURNS nerode.interval LANGUAGE plpgsql IMMUTABLE AS $$
+BEGIN
+    IF p ? 'guard' THEN
+        RETURN nerode.iv_meet(nerode.iv_from_json(p->'guard'->'iv'),
+                             nerode.payoff_affine_domain(p->'guard'->'then'));
+    ELSIF p ? 'otimes' THEN
+        RETURN nerode.iv_meet(nerode.payoff_affine_domain(p->'otimes'->0),
+                             nerode.payoff_affine_domain(p->'otimes'->1));
+    END IF;
+    RETURN nerode.iv_full();
+END $$;
+
 CREATE OR REPLACE FUNCTION nerode.payoff_opt(p JSONB, p_sense TEXT)
 RETURNS JSONB AS $$
 DECLARE
@@ -97,9 +147,28 @@ DECLARE
     v_v      NUMERIC;
     v_best_v NUMERIC := NULL;
     v_best_d NUMERIC := NULL;
+    v_domain nerode.interval;
+    v_affine NUMERIC[];
 BEGIN
-    -- candidate data values: D's lower bound 0, plus all interior breakpoints.
-    v_cands := ARRAY[0::numeric] || nerode.payoff_breakpoints(p);
+    IF p_sense IS NULL OR p_sense NOT IN ('best','worst') THEN
+        RAISE EXCEPTION 'payoff_opt: sense must be best or worst';
+    END IF;
+    IF NOT nerode.payoff_supported_affine(p) THEN
+        RETURN jsonb_build_object('supported',FALSE,'val',NULL,'d',NULL,
+            'reason','only affine payoffs with interval guards are currently certified');
+    END IF;
+    v_domain := nerode.payoff_affine_domain(p);
+    IF nerode.iv_is_empty(v_domain) THEN
+        RETURN jsonb_build_object('supported',TRUE,'val',NULL,'d',NULL);
+    END IF;
+    v_affine := nerode.payoff_affine(p);
+    IF v_domain.hi IS NULL AND ((p_sense='best' AND v_affine[1]>0)
+                                 OR (p_sense='worst' AND v_affine[1]<0)) THEN
+        RETURN jsonb_build_object('supported',FALSE,'unbounded',TRUE,'val',NULL,'d',NULL,
+            'reason','objective is unbounded on its admissible interval');
+    END IF;
+    v_cands := ARRAY[v_domain.lo];
+    IF v_domain.hi IS NOT NULL THEN v_cands := v_cands || v_domain.hi; END IF;
 
     FOREACH v_c IN ARRAY v_cands LOOP
         IF v_c < 0 THEN CONTINUE; END IF;            -- D = ℝ≥0
@@ -113,13 +182,14 @@ BEGIN
         END IF;
     END LOOP;
 
-    RETURN jsonb_build_object('val', v_best_v, 'd', v_best_d);
+    RETURN jsonb_build_object('supported',TRUE,'val', v_best_v, 'd', v_best_d);
 END;
 $$ LANGUAGE plpgsql IMMUTABLE;
 
 COMMENT ON FUNCTION nerode.payoff_opt(JSONB, TEXT) IS
-    'Exact extremum (best|worst) of a piecewise-linear local payoff expression '
-    'over its feasible domain, returning {val, d}. val NULL ⇒ −∞ (infeasible).';
+    'Exact extremum of an affine payoff with interval guards; supported=false '
+    'for nested maxima, unsupported syntax, or an unbounded objective. '
+    'supported=true and val=NULL means the domain is infeasible.';
 
 -- ---------------------------------------------------------------------------
 -- nerode.extremal(product, sense, horizon) → (value NUMERIC, witness JSONB)
@@ -154,6 +224,46 @@ BEGIN
     IF p_sense NOT IN ('best','worst') THEN
         RAISE EXCEPTION 'extremal: sense must be best or worst, got %', p_sense;
     END IF;
+    IF p_sense IS NULL OR p_horizon IS NULL OR p_horizon<0 OR p_horizon>4096 THEN
+        RAISE EXCEPTION 'extremal: invalid sense or horizon (supported range 0..4096)';
+    END IF;
+    IF (SELECT count(*) FROM nerode.states WHERE automaton_id=p_product)>256
+       OR (SELECT count(*) FROM nerode.transitions WHERE automaton_id=p_product)>16384
+       OR (SELECT count(*) FROM nerode.transitions WHERE automaton_id=p_product)::BIGINT
+           *p_horizon>8000000 THEN
+        RAISE EXCEPTION 'extremal: resource budget exceeded';
+    END IF;
+    IF (SELECT count(*) FROM nerode.wffa_terminal WHERE automaton_id=p_product
+        AND role='initial')<>1
+       OR EXISTS (SELECT 1 FROM nerode.wffa_terminal WHERE automaton_id=p_product
+                   AND role='initial' AND weight IS NULL)
+       OR EXISTS (SELECT 1 FROM nerode.transitions WHERE automaton_id=p_product
+                   GROUP BY from_state,symbol HAVING count(*)>1)
+       OR EXISTS (SELECT 1 FROM nerode.transitions t
+                   LEFT JOIN nerode.wffa_weight w ON w.transition_id=t.id
+                   WHERE t.automaton_id=p_product AND (w.transition_id IS NULL OR t.symbol IS NULL))
+       OR EXISTS (SELECT 1 FROM nerode.transitions t
+                   JOIN nerode.alphabets a ON a.id=v_a.alphabet_id
+                   WHERE t.automaton_id=p_product AND NOT t.symbol=ANY(a.symbols)) THEN
+        RETURN QUERY SELECT NULL::NUMERIC,jsonb_build_object('kind','payoff_trace',
+            'supported',FALSE,'feasible',NULL,'value',NULL,'horizon',p_horizon,
+            'reason','exact extremal replay requires a deterministic weighted automaton');
+        RETURN;
+    END IF;
+
+    -- Check the complete input domain before DP: an unsupported edge must not
+    -- silently disappear and turn a non-decision into an infeasibility claim.
+    FOR v_row IN SELECT w.payoff FROM nerode.transitions t
+                 JOIN nerode.wffa_weight w ON w.transition_id=t.id
+                 WHERE t.automaton_id=p_product LOOP
+        v_opt := nerode.payoff_opt(v_row.payoff,p_sense);
+        IF NOT COALESCE((v_opt->>'supported')::BOOLEAN,FALSE) THEN
+            RETURN QUERY SELECT NULL::NUMERIC,jsonb_build_object('kind','payoff_trace',
+                'supported',FALSE,'feasible',NULL,'value',NULL,'horizon',p_horizon,
+                'reason',v_opt->>'reason','unbounded',COALESCE((v_opt->>'unbounded')::BOOLEAN,FALSE));
+            RETURN;
+        END IF;
+    END LOOP;
 
     -- DP table:  one row per (step, state) holding the optimal accumulated value
     -- and the backpointer (predecessor state, symbol, chosen data value).
@@ -166,9 +276,9 @@ BEGIN
 
     -- Layer 0: initial states with their wt_I.
     INSERT INTO _nerode_dp (step, state, val, from_state, sym, d)
-    SELECT 0, state_id, COALESCE(weight, 0), NULL, NULL, NULL
+    SELECT 0, state_id, weight, NULL, NULL, NULL
     FROM nerode.wffa_terminal
-    WHERE automaton_id = p_product AND role = 'initial';
+    WHERE automaton_id = p_product AND role = 'initial' AND weight IS NOT NULL;
 
     -- Relaxation over the horizon.
     FOR v_k IN 0 .. p_horizon - 1 LOOP
@@ -206,10 +316,11 @@ BEGIN
     -- Terminal selection: best/worst of (val + wt_F) over all final states and
     -- all step counts <= horizon (variable-length words: early autocall etc.).
     FOR v_row IN
-        SELECT dp.step AS k, dp.state AS s, dp.val + COALESCE(wt.weight,0) AS total
+        SELECT dp.step AS k, dp.state AS s, dp.val + wt.weight AS total
         FROM _nerode_dp dp
         JOIN nerode.wffa_terminal wt
           ON wt.automaton_id = p_product AND wt.role = 'final' AND wt.state_id = dp.state
+         AND wt.weight IS NOT NULL
     LOOP
         IF v_best_total IS NULL
            OR (p_sense = 'best'  AND v_row.total > v_best_total)
@@ -224,7 +335,7 @@ BEGIN
         -- no accepting admissible run within the horizon
         RETURN QUERY SELECT NULL::numeric,
             jsonb_build_object('kind','payoff_trace','sense',p_sense,
-                'value', NULL, 'horizon', p_horizon, 'feasible', FALSE,
+                'value', NULL, 'horizon', p_horizon, 'supported',TRUE,'feasible', FALSE,
                 'note','no admissible accepting run within horizon');
         RETURN;
     END IF;
@@ -243,7 +354,7 @@ BEGIN
     RETURN QUERY SELECT v_best_total,
         jsonb_build_object(
             'kind','payoff_trace', 'sense', p_sense,
-            'value', v_best_total, 'horizon', p_horizon, 'feasible', TRUE,
+            'value', v_best_total, 'horizon', p_horizon, 'supported',TRUE,'feasible', TRUE,
             'length', v_best_step, 'history', v_hist,
             'product_id', p_product
         );
@@ -251,7 +362,6 @@ END;
 $$ LANGUAGE plpgsql;
 
 COMMENT ON FUNCTION nerode.extremal(BIGINT, TEXT, INTEGER) IS
-    'Exact best/worst-case payoff over a scenario-restricted product WFFA '
-    '(arXiv:2606.11223 Thm 3), with a witness finance word. Best = longest path, '
-    'worst = shortest path over the max-plus DP; worst-case assumes a '
-    'deterministic product. Returns (value, witness JSONB of kind payoff_trace).';
+    'Exact finite-horizon extremum for deterministic WFFAs with affine interval-guarded '
+    'payoffs. Unsupported or unbounded input gives value=NULL, supported=false. '
+    'The returned word proves attainment; independent optimality needs a bound certificate.';

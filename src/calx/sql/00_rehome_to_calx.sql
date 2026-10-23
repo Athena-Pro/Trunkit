@@ -8,9 +8,10 @@ CREATE SCHEMA IF NOT EXISTS calx;
 CREATE SCHEMA IF NOT EXISTS curry;
 CREATE SCHEMA IF NOT EXISTS kan;
 
--- Unqualified names in the calx SQL (sql/01..07) must keep resolving once the
--- objects live in `calx`. Pin the role's search_path.
-ALTER ROLE trunk SET search_path = calx, curry, kan, public;
+-- The loader and calx.db.connect set a session search_path. Migration 121
+-- pins the routines' own paths for qualified SQL calls from other clients.
+-- Do not alter a hard-coded cluster role: external databases may have different
+-- owners, and a database-local bootstrap must not require ALTER ROLE privileges.
 
 -- Move every base table currently in public into calx.
 DO $$
