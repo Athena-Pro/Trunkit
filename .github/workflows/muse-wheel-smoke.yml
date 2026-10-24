@@ -10,12 +10,14 @@ jobs:
     # agent VM. The tool environment itself has neither Docker nor system libpq.
     container: ubuntu:24.04
     services:
+      # Deliberately not the historical `trunk` role: the schema must bootstrap
+      # and resolve its routines without any role-level search_path.
       ledger-postgres:
         image: postgres:16
         env:
-          POSTGRES_USER: trunk
-          POSTGRES_PASSWORD: trunk
-          POSTGRES_DB: trunk
+          POSTGRES_USER: muse_ledger
+          POSTGRES_PASSWORD: muse_ledger
+          POSTGRES_DB: muse_ledger
         options: >-
           --health-cmd pg_isready
           --health-interval 5s
@@ -33,7 +35,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      CALX_DSN: postgresql://trunk:trunk@ledger-postgres:5432/trunk
+      CALX_DSN: postgresql://muse_ledger:muse_ledger@ledger-postgres:5432/muse_ledger
       NERODE_DSN: postgresql://nerode:nerode@workspace-postgres:5432/nerode
     steps:
       - name: Install interpreter and build prerequisites
