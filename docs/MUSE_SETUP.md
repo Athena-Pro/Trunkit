@@ -21,7 +21,7 @@ From a source checkout, install with `python3 -m pip install '.[muse]'`.
 For a built release wheel, replace the install command with:
 
 ```sh
-python3 -m pip install './dist/trunkit-0.5.0-py3-none-any.whl[muse]'
+python3 -m pip install './dist/trunkit-0.5.1-py3-none-any.whl[muse]'
 ```
 
 The `muse` extra includes both the binary Psycopg implementation (bundled libpq)
