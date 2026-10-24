@@ -3,6 +3,7 @@
 --
 --  Full pipeline:
 --    1. Parse regex → extract alphabet
+--       Flat literal alternations build a trie directly, then go to step 5.
 --    2. Shunting-yard: infix (with explicit concatenation '.') → postfix
 --    3. Thompson NFA construction (in PL/pgSQL, result stored in nerode tables)
 --    4. ε-closure / subset construction  → DFA
@@ -509,8 +510,76 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- ---------------------------------------------------------------------------
+-- Internal: build a trie for an already validated, flat literal alternation.
+-- Bulk prefix/edge inserts avoid Thompson's epsilon graph and subset walks.
+-- Missing transitions stay implicit until the minimized result is emitted.
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION nerode._literal_trie(
+    p_literals    TEXT,
+    p_alphabet_id BIGINT
+)
+RETURNS BIGINT AS $$
+DECLARE
+    v_dfa_id BIGINT;
+    v_symbols TEXT[];
+    v_state_count INTEGER;
+BEGIN
+    SELECT symbols INTO v_symbols
+    FROM nerode.alphabets WHERE id = p_alphabet_id;
+
+    -- As in subset construction, only alphabet symbols can be consumed.
+    -- Keep the empty root even if no complete word uses the given alphabet.
+    -- Prefix text is deliberately not indexed: a supported literal may exceed
+    -- PostgreSQL's btree entry size limit. These bulk joins use text equality.
+    CREATE TEMP TABLE _regex_prefixes ON COMMIT DROP AS
+    WITH words AS (
+        SELECT DISTINCT word
+        FROM unnest(string_to_array(p_literals, '|')) AS w(word)
+        WHERE NOT EXISTS (
+            SELECT 1 FROM regexp_split_to_table(word, '') AS c(symbol)
+            WHERE (symbol = ANY(v_symbols)) IS NOT TRUE
+        )
+    ), prefixes AS (
+        SELECT left(word, n) AS prefix, n = length(word) AS is_accepting
+        FROM words CROSS JOIN LATERAL generate_series(0, length(word)) AS g(n)
+        UNION ALL
+        SELECT '', FALSE
+    ), unique_prefixes AS (
+        SELECT prefix, bool_or(is_accepting) AS is_accepting
+        FROM prefixes GROUP BY prefix
+    )
+    SELECT (row_number() OVER (ORDER BY prefix COLLATE "C") - 1)::INTEGER AS state_id,
+           prefix, is_accepting
+    FROM unique_prefixes;
+
+    GET DIAGNOSTICS v_state_count = ROW_COUNT;
+    ANALYZE _regex_prefixes;
+
+    INSERT INTO nerode.automata (name, type, alphabet_id, state_count, provenance)
+    VALUES ('__trie_temp__', 'DFA', p_alphabet_id, v_state_count,
+            jsonb_build_object('operation', 'literal_trie'))
+    RETURNING id INTO v_dfa_id;
+
+    INSERT INTO nerode.states (automaton_id, state_id, label, is_initial, is_accepting)
+    SELECT v_dfa_id, state_id, prefix, prefix = '', is_accepting
+    FROM _regex_prefixes;
+
+    INSERT INTO nerode.transitions (automaton_id, from_state, symbol, to_state)
+    SELECT v_dfa_id, parent.state_id, right(child.prefix, 1), child.state_id
+    FROM _regex_prefixes child
+    JOIN _regex_prefixes parent ON parent.prefix = left(child.prefix, length(child.prefix) - 1)
+    WHERE child.prefix <> '';
+
+    DROP TABLE _regex_prefixes;
+    RETURN v_dfa_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ---------------------------------------------------------------------------
 -- Public: nerode.from_regex(p_pattern, p_name)
--- Full pipeline: regex → Thompson NFA → subset DFA → Hopcroft minimal DFA
+-- Flat literal alternations → trie; other regex → Thompson NFA → subset DFA.
+-- Both paths use Hopcroft minimization and preserve its partition witness.
 -- Returns the id of the stored, minimized DFA.
 -- ---------------------------------------------------------------------------
 
@@ -530,6 +599,8 @@ DECLARE
     v_nfa_id      BIGINT;
     v_dfa_id      BIGINT;
     v_min_id      BIGINT;
+    v_literals    TEXT;
+    v_construction TEXT;
 BEGIN
     -- Alphabet: use explicit symbols when provided, else derive from pattern
     IF p_symbols IS NOT NULL THEN
@@ -555,17 +626,24 @@ BEGIN
 
     SELECT id INTO v_alph_id FROM nerode.alphabets WHERE name = v_alph_name;
 
-    -- Preprocess: insert explicit concatenation operators
-    v_prepped := nerode._insert_concat(p_pattern);
+    -- Strip only whole-expression wrappers before recognizing a word list.
+    -- Anything containing operators/grouping after this falls back to the
+    -- existing parser, including invalid syntax (so errors are not hidden).
+    v_literals := p_pattern;
+    WHILE left(v_literals, 1) = '(' AND right(v_literals, 1) = ')' LOOP
+        v_literals := substring(v_literals, 2, length(v_literals) - 2);
+    END LOOP;
 
-    -- Convert to postfix
-    v_postfix := nerode._to_postfix(v_prepped);
-
-    -- Thompson NFA construction
-    v_nfa_id := nerode._thompson(v_postfix, v_alph_id);
-
-    -- Subset construction → DFA
-    v_dfa_id := nerode._subset_construction(v_nfa_id, v_alph_id);
+    IF v_literals ~ '^[a-zA-Z0-9_]+([|][a-zA-Z0-9_]+)*$' THEN
+        v_dfa_id := nerode._literal_trie(v_literals, v_alph_id);
+        v_construction := 'literal_trie';
+    ELSE
+        v_prepped := nerode._insert_concat(p_pattern);
+        v_postfix := nerode._to_postfix(v_prepped);
+        v_nfa_id := nerode._thompson(v_postfix, v_alph_id);
+        v_dfa_id := nerode._subset_construction(v_nfa_id, v_alph_id);
+        v_construction := 'thompson_subset';
+    END IF;
 
     -- Minimize
     v_min_id := nerode.minimize(v_dfa_id);
@@ -576,6 +654,7 @@ BEGIN
         name         = COALESCE(p_name, 'regex_' || left(p_pattern, 40)),
         provenance   = provenance || jsonb_build_object(
             'source_regex',     p_pattern,
+            'construction',     v_construction,
             'postfix',          v_postfix,
             'nfa_id',           v_nfa_id,
             'intermediate_dfa', v_dfa_id
@@ -601,5 +680,6 @@ COMMENT ON FUNCTION nerode.from_regex(TEXT, TEXT, TEXT[]) IS
     'Full regex → minimal DFA pipeline. '
     'Supports: literals [a-zA-Z0-9_], | * + ? (). '
     'p_symbols: explicit alphabet (derived from pattern if NULL). '
-    'Pipeline: Thompson NFA → subset construction → Hopcroft minimization. '
+    'Flat literal alternations build a trie directly; other patterns use Thompson NFA '
+    'and subset construction. Both paths use Hopcroft minimization. '
     'Returns the stored minimal DFA id.';

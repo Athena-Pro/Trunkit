@@ -26,7 +26,9 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import signal
 import sys
+from collections.abc import Iterator
 from typing import Any
 
 import psycopg
@@ -58,6 +60,35 @@ def _die(msg: str) -> None:
 
 def _json_out(data: Any) -> None:
     print(json.dumps(data, indent=2, default=str))
+
+
+class _SignalInterrupt(KeyboardInterrupt):
+    """Preserve the signal's exit status while triggering psycopg cancellation."""
+
+    def __init__(self, signum: int):
+        self.signum = signum
+
+
+@contextlib.contextmanager
+def _cancel_on_signals() -> Iterator[None]:
+    """Let psycopg cancel an active query before closing the CLI connection.
+
+    Psycopg catches KeyboardInterrupt while waiting for a result, sends a
+    cancellation request, and drains the result before re-raising. SIGTERM's
+    default action bypasses that cleanup and can leave a CPU-bound backend
+    running after the client exits, so route both CLI signals through it.
+    """
+    def interrupt(signum: int, _frame: Any) -> None:
+        raise _SignalInterrupt(signum)
+
+    previous = {}
+    try:
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            previous[signum] = signal.signal(signum, interrupt)
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
 
 
 # ---------------------------------------------------------------------------
@@ -97,20 +128,22 @@ def cmd_build(args: argparse.Namespace) -> None:
 def cmd_min(args: argparse.Namespace) -> None:
     """Minimize an existing DFA."""
     with connect(args.dsn) as conn:
-        row = conn.execute(
-            "SELECT nerode.minimize(%s)", (args.id,)
-        ).fetchone()
+        if args.write:
+            row = conn.execute(
+                "SELECT automaton_id, claim_id FROM nerode.minimize_certified(%s)",
+                (args.id,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT nerode.minimize(%s)", (args.id,)
+            ).fetchone()
         if row is None:
             _die(f"automaton {args.id} not found")
         min_id: int = row[0]
         print(f"minimized automaton id: {min_id}")
 
         if args.write:
-            row2 = conn.execute(
-                "SELECT automaton_id, claim_id FROM nerode.minimize_certified(%s)",
-                (args.id,),
-            ).fetchone()
-            print(f"cert claim id: {row2[1]}")
+            print(f"cert claim id: {row[1]}")
             conn.commit()
         else:
             conn.rollback()
@@ -482,14 +515,17 @@ def main(argv: list[str] | None = None) -> None:
     elif not args.dsn:
         args.dsn = resolve_dsn()
 
-    try:
-        _DISPATCH[args.command](args)
-    except psycopg.OperationalError as exc:
-        _die(f"database connection failed: {exc}")
-    except psycopg.Error as exc:
-        _die(f"database error: {exc}")
-    except KeyboardInterrupt:
-        sys.exit(130)
+    with _cancel_on_signals():
+        try:
+            _DISPATCH[args.command](args)
+        except psycopg.OperationalError as exc:
+            _die(f"database connection failed: {exc}")
+        except psycopg.Error as exc:
+            _die(f"database error: {exc}")
+        except _SignalInterrupt as exc:
+            sys.exit(128 + exc.signum)
+        except KeyboardInterrupt:
+            sys.exit(130)
 
 
 if __name__ == "__main__":
