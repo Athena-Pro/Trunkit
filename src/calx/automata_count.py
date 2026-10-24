@@ -305,9 +305,14 @@ def product_dfa(
 
 def canonical_weighted_dfa(snapshot: dict[str, Any]) -> dict[str, Any]:
     """Integer-weighted DFA. Weights are [source,symbol,integer] triples."""
+    shape = "expected a weighted automaton {dfa, weights, initial_weight, final_weights}"
     if not isinstance(snapshot, dict):
-        raise ValueError("weighted automaton must be an object")
-    dfa = canonical_dfa(snapshot.get("dfa"))
+        raise ValueError(shape)
+    if not isinstance(snapshot.get("dfa"), dict):
+        bare = "transitions" in snapshot or "states" in snapshot
+        raise ValueError(shape + ("; got a bare DFA, pass it as the dfa field" if bare
+                                  else "; dfa must be an object"))
+    dfa = canonical_dfa(snapshot["dfa"])
     expected = {(a, symbol) for a, symbol, _ in dfa["transitions"]}
     weights = snapshot.get("weights")
     if not isinstance(weights, list) or len(weights) != len(expected):

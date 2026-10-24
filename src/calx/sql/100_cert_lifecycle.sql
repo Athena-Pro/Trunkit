@@ -160,8 +160,10 @@ DECLARE
 BEGIN
     SELECT * INTO v_claim FROM cert.claim WHERE id = p_claim_id;
     IF NOT FOUND THEN
-        RETURN QUERY SELECT FALSE,
-            jsonb_build_object('error', format('claim %s not found', p_claim_id)),
+        -- A missing claim was never checked: UNVERIFIED (NULL), not refuted.
+        RETURN QUERY SELECT NULL::BOOLEAN,
+            jsonb_build_object('error', format('claim %s not found', p_claim_id),
+                               'not_found', TRUE),
             NULL::JSONB;
         RETURN;
     END IF;
