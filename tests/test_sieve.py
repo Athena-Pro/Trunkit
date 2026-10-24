@@ -64,3 +64,18 @@ def test_perfect_numbers_under_100(populated):
         cur.execute("SELECT n FROM perfect_numbers ORDER BY n")
         rows = [r[0] for r in cur.fetchall()]
     assert rows == [6, 28]
+
+
+def test_pure_generate_reruns_and_extends(calx_conn):
+    # A re-run, or a raised limit, must not die on primes_pkey.
+    generate.generate_pure(calx_conn, 100)
+    generate.generate_pure(calx_conn, 100)
+    generate.generate_pure(calx_conn, 200)
+    with calx_conn.cursor() as cur:
+        cur.execute("SELECT p, discovered_order FROM primes ORDER BY p")
+        rows = cur.fetchall()
+        cur.execute("SELECT signature FROM prime_signatures WHERE n = 192")
+        (sig,) = cur.fetchone()
+    assert [p for p, _ in rows][:25] == PRIMES_UNDER_100
+    assert [rank for _, rank in rows] == list(range(1, 47))  # pi(200) = 46
+    assert sig == "2^6 · 3"

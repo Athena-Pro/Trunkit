@@ -52,3 +52,17 @@ def test_unified_reapply_preserves_lifecycle_and_dependent_views(calx_dsn):
                 conn.execute("SELECT count(*) FROM cert.tainted_closure").fetchone()
         finally:
             conn.rollback()
+
+
+def test_verify_reports_a_missing_claim_as_unverified_not_refuted(calx_dsn):
+    with db.connect(calx_dsn) as conn:
+        try:
+            db.apply_unified(conn, sync_kan=False)
+            missing = conn.execute("SELECT COALESCE(max(id), 0) + 1 FROM cert.claim").fetchone()[0]
+            ok, evidence = conn.execute(
+                "SELECT ok, evidence FROM cert.verify(%s)", (missing,),
+            ).fetchone()
+            assert ok is None
+            assert evidence["not_found"] is True
+        finally:
+            conn.rollback()

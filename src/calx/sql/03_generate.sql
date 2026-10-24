@@ -87,13 +87,17 @@ BEGIN
 
     RAISE NOTICE '[3/5] Populating primes table  (%)', clock_timestamp();
 
+    -- ON CONFLICT keeps a re-run (or a raised lim) from dying on primes_pkey.
+    -- Ranks are deterministic, so the stored prefix agrees and only the new
+    -- tail lands, the same contract as the primesieve harness's staged COPY.
     INSERT INTO primes (p, discovered_order)
     SELECT n, ROW_NUMBER() OVER (ORDER BY n)
     FROM   integers
-    WHERE  is_prime = TRUE;
+    WHERE  is_prime = TRUE
+    ON CONFLICT DO NOTHING;
 
     GET DIAGNOSTICS prime_cnt = ROW_COUNT;
-    RAISE NOTICE '      % primes found under %', prime_cnt, lim;
+    RAISE NOTICE '      % new primes under %', prime_cnt, lim;
 
 
     -- ── Phases 4 & 5 delegated to shared procedure ───────────────────────────

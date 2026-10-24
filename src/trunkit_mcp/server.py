@@ -24,6 +24,7 @@ Prover tools (require TRUNKIT_ALLOW_WRITE=1 in env):
 Configuration via environment variables:
   CALX_DSN              — Postgres DSN (default postgresql://trunk:trunk@localhost:5434/trunk)
   TRUNKIT_ALLOW_WRITE   — set to "1" to enable prover tools (default: off)
+  FASTMCP_LOG_LEVEL     — server log level on stderr (default WARNING; INFO logs every call)
   TRUNKIT_SRC           — path prepended to sys.path; use to prefer local dev tree over
                           the installed PyPI version (e.g. C:\\AI-Local\\Trunk\\src)
 """
@@ -69,10 +70,15 @@ except ImportError:
 
 _ALLOW_WRITE = os.environ.get("TRUNKIT_ALLOW_WRITE", "0").strip() == "1"
 _DSN: str | None = os.environ.get("CALX_DSN")
+# FastMCP logs "Processing request of type ..." at INFO on every call. It goes
+# to stderr, but stdio clients forward server stderr into their own, where it
+# interleaves with result JSON. Stay quiet unless FASTMCP_LOG_LEVEL asks.
+_LOG_LEVEL = os.environ.get("FASTMCP_LOG_LEVEL", "WARNING").strip().upper()
 
 # ── Server ──────────────────────────────────────────────────────────────────
 mcp = FastMCP(
     "trunkit",
+    log_level=_LOG_LEVEL,
     instructions=textwrap.dedent("""\
         Trunkit MCP — proof-carrying ledger tools.
 
@@ -118,6 +124,19 @@ def _db_connect():
     if not _HAS_DB:
         raise RuntimeError("psycopg not installed — DB tools unavailable")
     return _db.connect(_DSN)
+
+
+def _claim_exists(cur, claim_id: int) -> bool:
+    # Checked here rather than trusted to cert.verify: ledgers whose overlay
+    # predates the fix still report a missing claim as ok = FALSE.
+    cur.execute("SELECT EXISTS (SELECT 1 FROM cert.claim WHERE id = %s)", (claim_id,))
+    return cur.fetchone()[0]
+
+
+def _claim_not_found(claim_id: int) -> dict[str, Any]:
+    # Never checked is not checked-and-false, so a missing id is unverified.
+    return {"claim_id": claim_id, "verdict": "unverified", "not_found": True,
+            "error": f"claim {claim_id} not found"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -283,16 +302,27 @@ def ledger_chain(bundle_json: str) -> dict[str, Any]:
     )
     missing = not results or any(r["stored_row_hash"] is None for r in results)
     verdict = "refuted" if failed else "unverified" if missing else "valid"
+    # The base schema stores no row hashes and exports version 1, so say that
+    # rather than leave "absent" to read as evidence that went missing.
+    reason = (
+        "stored row hash absent: a version 1 bundle comes from a ledger without "
+        "the hash-chain extension, so no chain evidence was ever recorded"
+        if bundle["trunk_bundle_version"] < 2
+        else "stored row hash absent; chain evidence unavailable"
+    )
     for result in results:
         if result["stored_row_hash"] is None:
             result["content_ok"] = None
-            result["reason"] = "stored row hash absent; chain evidence unavailable"
-    return {
+            result["reason"] = reason
+    out: dict[str, Any] = {
         "verdict": verdict,
         "chain_ok": False if failed else None if missing else True,
         "claim_count": len(results),
         "claims": results,
     }
+    if verdict == "unverified":
+        out["reason"] = reason
+    return out
 
 
 @mcp.tool()
@@ -428,14 +458,13 @@ def claim_verify(claim_id: int) -> dict[str, Any]:
     """
     try:
         with _db_connect() as conn, conn.cursor() as cur:
+            if not _claim_exists(cur, claim_id):
+                return _claim_not_found(claim_id)
             cur.execute(
                 "SELECT ok, evidence, witness FROM cert.verify(%s)",
                 (claim_id,),
             )
             row = cur.fetchone()
-
-        if row is None:
-            return {"error": f"claim {claim_id} not found"}
 
         ok, evidence, witness = row
         result: dict[str, Any] = {
@@ -880,12 +909,12 @@ def claim_check(claim_id: int, dry_run: bool = True) -> dict[str, Any]:
     try:
         if dry_run:
             with _db_connect() as conn, conn.cursor() as cur:
+                if not _claim_exists(cur, claim_id):
+                    return _claim_not_found(claim_id)
                 cur.execute(
                     "SELECT ok, evidence FROM cert.verify(%s)", (claim_id,)
                 )
                 row = cur.fetchone()
-            if row is None:
-                return {"error": f"claim {claim_id} not found"}
             ok, evidence = row
             return {
                 "claim_id": claim_id,
@@ -900,7 +929,7 @@ def claim_check(claim_id: int, dry_run: bool = True) -> dict[str, Any]:
             )
             row = cur.fetchone()
             if row is None:
-                return {"error": f"claim {claim_id} not found"}
+                return _claim_not_found(claim_id)
             method = row[0]
             fn = (
                 "cert.check_with_witness" if method == "witness_carry"

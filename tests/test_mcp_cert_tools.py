@@ -389,6 +389,23 @@ def test_legacy_chain_without_hash_is_unverified_not_tampered():
     assert out["chain_ok"] is None
     assert out["claims"][0]["content_ok"] is None
     assert "absent" in out["claims"][0]["reason"]
+    # A v1 export says why it has no chain, at the top level as well.
+    assert "hash-chain extension" in out["reason"]
+
+
+def test_v2_bundle_missing_a_hash_is_not_blamed_on_the_extension():
+    out = server.ledger_chain(_portable_bundle(_portable_entry(), version=2))
+    assert out["verdict"] == "unverified"
+    assert "extension" not in out["reason"]
+
+
+def test_extremal_tool_names_the_weighted_shape_for_a_bare_dfa():
+    dfa = {"alphabet": ["a"], "states": [0], "initial": 0, "accepting": [0],
+           "transitions": [[0, "a", 0]]}
+    out = server.automata_extremal(json.dumps(dfa), 3)
+    assert out["verdict"] == "unverified"
+    assert "{dfa, weights, initial_weight, final_weights}" in out["error"]
+    assert "bare DFA" in out["error"]
 
 
 def test_chain_mismatch_is_refuted_even_alongside_missing_evidence():
@@ -397,3 +414,19 @@ def test_chain_mismatch_is_refuted_even_alongside_missing_evidence():
     out = server.ledger_chain(_portable_bundle(hashed, legacy))
     assert out["verdict"] == "refuted"
     assert out["chain_ok"] is False
+
+
+def test_missing_claim_is_unverified_through_tools_and_cli(monkeypatch, capsys):
+    dsn = _calx_dsn()
+    try:
+        with psycopg.connect(dsn, connect_timeout=3) as c:
+            missing = c.execute("SELECT COALESCE(max(id), 0) + 1 FROM cert.claim").fetchone()[0]
+    except psycopg.Error as exc:
+        pytest.skip(f"calx DB not reachable: {exc}")
+    monkeypatch.setattr(server, "_DSN", dsn)
+    for out in (server.claim_verify(missing), server.claim_check(missing)):
+        assert out["verdict"] == "unverified" and out["not_found"] is True
+
+    from calx import cli
+    assert cli.main(["--dsn", dsn, "verify", str(missing)]) == 1
+    assert "UNVERIFIED (not found)" in capsys.readouterr().out

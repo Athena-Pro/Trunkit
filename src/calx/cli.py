@@ -51,6 +51,13 @@ def _utf8_stdio() -> None:
 # Consumer commands — read-only, no --write gate
 # ---------------------------------------------------------------------------
 
+def _claim_exists(cur: psycopg.Cursor, claim_id: int) -> bool:
+    # Checked here rather than trusted to cert.verify: ledgers whose overlay
+    # predates the fix still report a missing claim as ok = FALSE (refuted).
+    cur.execute("SELECT EXISTS (SELECT 1 FROM cert.claim WHERE id = %s)", (claim_id,))
+    return cur.fetchone()[0]
+
+
 def _cmd_verify_bundle(args: argparse.Namespace) -> int:
     from . import bundle as bundle_mod
 
@@ -92,15 +99,14 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         print("error: provide a claim_id or --bundle FILE", file=sys.stderr)
         return 2
     with db.connect(args.dsn) as conn, conn.cursor() as cur:
+        if not _claim_exists(cur, args.claim_id):
+            print(f"  [?] claim {args.claim_id}  →  UNVERIFIED (not found)")
+            return 1
         cur.execute(
             "SELECT ok, evidence, witness FROM cert.verify(%s)",
             (args.claim_id,),
         )
-        row = cur.fetchone()
-    if row is None:
-        print(f"  claim {args.claim_id} not found")
-        return 1
-    ok, evidence, witness = row
+        ok, evidence, witness = cur.fetchone()
     status = "VALID" if ok is True else "REFUTED" if ok is False else "UNVERIFIED"
     mark = "✓" if ok is True else "✗" if ok is False else "?"
     print(f"  [{mark}] claim {args.claim_id}  →  {status}")
@@ -163,15 +169,14 @@ def _cmd_export(args: argparse.Namespace) -> int:
 def _cmd_check(args: argparse.Namespace) -> int:
     if not args.write:
         with db.connect(args.dsn) as conn, conn.cursor() as cur:
+            if not _claim_exists(cur, args.claim_id):
+                print(f"  claim {args.claim_id} not found")
+                return 1
             cur.execute(
                 "SELECT ok, evidence FROM cert.verify(%s)",
                 (args.claim_id,),
             )
-            row = cur.fetchone()
-        if row is None:
-            print(f"  claim {args.claim_id} not found")
-            return 1
-        ok, evidence = row
+            ok, evidence = cur.fetchone()
         status = "valid" if ok is True else "refuted" if ok is False else "unverified"
         print(f"  [dry-run] claim {args.claim_id} would attest as: {status}")
         print("  pass --write to record a certificate")
