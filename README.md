@@ -149,6 +149,9 @@ They verify a cached brief survives a certified close/open handoff, then roll
 back the demo transactions. Set `CALX_DSN` / `NERODE_DSN` to reuse these connections
 without passing options.
 
+For Nerode SQL upgrades, large word-list builds, minimization, and cancellation
+behavior, see the [construction and minimization guide](docs/NERODE_PERFORMANCE.md).
+
 ---
 
 ## CLI
